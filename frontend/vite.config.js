@@ -7,7 +7,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       "/api": {
-        target: "http://backend:4000",
+        target: "https://tradesk-production.up.railway.app",
         changeOrigin: true,
       },
     },
