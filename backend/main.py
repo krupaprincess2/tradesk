@@ -1,66 +1,41 @@
-# ============================================================
-# TradDesk Backend — Python FastAPI Version
-# ============================================================
-# FastAPI is a modern Python web framework for building APIs.
-# It's fast, easy to read, and great for learning Python!
-# ============================================================
-
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr          # For data validation
-from typing import Optional, List
-import sqlite3                                     # Built-in Python database
-import hashlib                                     # For hashing passwords
-import hmac                                        # For secure comparison
-import jwt                                         # For login tokens
-import os                                          # For reading env variables
-from datetime import datetime, timedelta
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+import sqlite3
+import hashlib
+import hmac
+import jwt
+import os
 import secrets
+from datetime import datetime, timedelta
 
-# ─── APP SETUP ───────────────────────────────────────────────
-# Create the FastAPI app — this is like Express() in Node.js
-app = FastAPI(title="TradDesk API", version="1.0.0")
+app = FastAPI(title="TradDesk API", version="2.0.0")
 
-# Allow frontend to talk to backend (CORS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # In production, set this to your Vercel URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Secret key for JWT tokens — read from environment variable
 JWT_SECRET = os.getenv("JWT_SECRET", "tradesk_default_secret_change_me")
-JWT_EXPIRE_DAYS = 7
-
-# Security scheme for protected routes
+DB_PATH = os.getenv("DB_PATH", "tradesk.db")
 bearer_scheme = HTTPBearer()
 
-# ─── DATABASE SETUP ──────────────────────────────────────────
-# SQLite is a simple file-based database — perfect for learning!
-DB_PATH = os.getenv("DB_PATH", "tradesk.db")
-
+# ─── DATABASE ─────────────────────────────────────────────────
 def get_db():
-    """
-    This function creates a database connection.
-    'with get_db() as db' automatically closes it when done.
-    Think of it like opening and closing a file.
-    """
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row   # Makes rows behave like dictionaries
-    conn.execute("PRAGMA journal_mode=WAL")  # Better for concurrent access
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 def init_db():
-    """
-    Creates all database tables when the app starts.
-    This is like setting up your spreadsheet columns.
-    """
     with get_db() as db:
         db.executescript("""
-            -- Users table: stores login info
             CREATE TABLE IF NOT EXISTS users (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 name       TEXT NOT NULL,
@@ -69,10 +44,21 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now'))
             );
 
-            -- Purchases table: raw goods you buy
+            -- Master items list: built from purchases
+            CREATE TABLE IF NOT EXISTS items (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                name       TEXT NOT NULL,
+                unit       TEXT NOT NULL DEFAULT 'units',
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(user_id, name)
+            );
+
+            -- Purchases: buying raw goods
             CREATE TABLE IF NOT EXISTS purchases (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL REFERENCES users(id),
+                item_id    INTEGER REFERENCES items(id),
                 date       TEXT NOT NULL,
                 supplier   TEXT NOT NULL,
                 item       TEXT NOT NULL,
@@ -84,98 +70,90 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now'))
             );
 
-            -- Sales table: goods you sell
-            CREATE TABLE IF NOT EXISTS sales (
+            -- Customers: with contact details
+            CREATE TABLE IF NOT EXISTS customers (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL REFERENCES users(id),
+                name       TEXT NOT NULL,
+                phone      TEXT,
+                address    TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            -- Sales: selling items with partial payment support
+            CREATE TABLE IF NOT EXISTS sales (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER NOT NULL REFERENCES users(id),
+                customer_id    INTEGER REFERENCES customers(id),
+                date           TEXT NOT NULL,
+                customer_name  TEXT NOT NULL,
+                customer_phone TEXT,
+                customer_addr  TEXT,
+                item           TEXT NOT NULL,
+                qty            REAL NOT NULL,
+                unit           TEXT NOT NULL DEFAULT 'units',
+                unit_price     REAL NOT NULL,
+                total          REAL NOT NULL,
+                paid_amount    REAL NOT NULL DEFAULT 0,
+                due_amount     REAL NOT NULL DEFAULT 0,
+                payment_status TEXT NOT NULL DEFAULT 'unpaid',
+                notes          TEXT,
+                created_at     TEXT DEFAULT (datetime('now'))
+            );
+
+            -- Payment history for partial payments
+            CREATE TABLE IF NOT EXISTS payments (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                sale_id    INTEGER NOT NULL REFERENCES sales(id),
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                amount     REAL NOT NULL,
                 date       TEXT NOT NULL,
-                customer   TEXT NOT NULL,
-                item       TEXT NOT NULL,
-                qty        REAL NOT NULL,
-                unit       TEXT NOT NULL DEFAULT 'units',
-                unit_price REAL NOT NULL,
-                total      REAL NOT NULL,
                 notes      TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             );
 
             CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id);
             CREATE INDEX IF NOT EXISTS idx_sales_user ON sales(user_id);
+            CREATE INDEX IF NOT EXISTS idx_items_user ON items(user_id);
+            CREATE INDEX IF NOT EXISTS idx_payments_sale ON payments(sale_id);
         """)
         db.commit()
 
-# Run DB setup when app starts
 init_db()
 
-# ─── PASSWORD HELPERS ─────────────────────────────────────────
+# ─── PASSWORD & JWT ───────────────────────────────────────────
 def hash_password(password: str) -> str:
-    """
-    Converts a plain password to a secure hash.
-    Example: "mypassword" → "a3f2b1c9d4..."
-    We NEVER store plain passwords — always hashed!
-    """
-    salt = secrets.token_hex(16)    # Random string to make hash unique
-    hashed = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        100000                       # 100k iterations = hard to crack
-    )
+    salt = secrets.token_hex(16)
+    hashed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
     return f"{salt}:{hashed.hex()}"
 
 def verify_password(password: str, stored: str) -> bool:
-    """
-    Checks if a plain password matches the stored hash.
-    Returns True if match, False if not.
-    """
     try:
         salt, hashed = stored.split(':')
-        new_hash = hashlib.pbkdf2_hmac(
-            'sha256',
-            password.encode('utf-8'),
-            salt.encode('utf-8'),
-            100000
-        )
+        new_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
         return hmac.compare_digest(new_hash.hex(), hashed)
-    except Exception:
+    except:
         return False
 
-# ─── JWT TOKEN HELPERS ────────────────────────────────────────
 def create_token(user_id: int, email: str, name: str) -> str:
-    """
-    Creates a JWT token — like a temporary ID card.
-    The user gets this after login and sends it with every request.
-    """
     payload = {
-        "id": user_id,
-        "email": email,
-        "name": name,
-        "exp": datetime.utcnow() + timedelta(days=JWT_EXPIRE_DAYS)
+        "id": user_id, "email": email, "name": name,
+        "exp": datetime.utcnow() + timedelta(days=7)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
-    """
-    This runs on every protected route.
-    It reads the token from the request header and returns the user info.
-    If token is invalid → returns 401 Unauthorized error.
-    """
     try:
-        token = credentials.credentials
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return payload   # Returns {"id": 1, "email": "...", "name": "..."}
+        return jwt.decode(credentials.credentials, JWT_SECRET, algorithms=["HS256"])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired, please login again")
+        raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-# ─── PYDANTIC MODELS (Data Validation) ───────────────────────
-# These are like forms — FastAPI checks all data matches before processing
-# If someone sends wrong data, FastAPI automatically returns an error!
-
+# ─── PYDANTIC MODELS ──────────────────────────────────────────
 class RegisterRequest(BaseModel):
     name: str
-    email: EmailStr          # Automatically validates email format
+    email: EmailStr
     password: str
 
 class LoginRequest(BaseModel):
@@ -185,337 +163,304 @@ class LoginRequest(BaseModel):
 class PurchaseCreate(BaseModel):
     date: str
     supplier: str
-    item: str
+    item: str              # Item name
     qty: float
-    unit: str = "units"     # Default value if not provided
+    unit: str = "units"
     unit_cost: float
     notes: Optional[str] = None
 
+class CustomerCreate(BaseModel):
+    name: str
+    phone: Optional[str] = None
+    address: Optional[str] = None
+
 class SaleCreate(BaseModel):
     date: str
-    customer: str
-    item: str
+    customer_name: str
+    customer_phone: Optional[str] = None
+    customer_addr: Optional[str] = None
+    item: str              # Must be an item that exists in purchases
     qty: float
     unit: str = "units"
     unit_price: float
+    paid_amount: float = 0  # How much customer paid now
     notes: Optional[str] = None
 
-# ─── AUTH ROUTES ──────────────────────────────────────────────
+class PaymentCreate(BaseModel):
+    amount: float
+    date: str
+    notes: Optional[str] = None
 
+# ─── AUTH ─────────────────────────────────────────────────────
 @app.post("/api/auth/register", status_code=201)
 def register(data: RegisterRequest):
-    """
-    Creates a new user account.
-    POST /api/auth/register
-    Body: { name, email, password }
-    """
-    # Validate password length
     if len(data.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-
     with get_db() as db:
-        # Check if email already exists
-        existing = db.execute(
-            "SELECT id FROM users WHERE email = ?", (data.email,)
-        ).fetchone()
-
-        if existing:
+        if db.execute("SELECT id FROM users WHERE email=?", (data.email,)).fetchone():
             raise HTTPException(status_code=409, detail="Email already registered")
-
-        # Hash the password before storing
-        hashed = hash_password(data.password)
-
-        # Insert new user into database
         cursor = db.execute(
-            "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-            (data.name, data.email, hashed)
+            "INSERT INTO users (name,email,password) VALUES (?,?,?)",
+            (data.name, data.email, hash_password(data.password))
         )
         db.commit()
-
-        # Create and return JWT token
         token = create_token(cursor.lastrowid, data.email, data.name)
-        return {
-            "token": token,
-            "user": {"id": cursor.lastrowid, "name": data.name, "email": data.email}
-        }
+        return {"token": token, "user": {"id": cursor.lastrowid, "name": data.name, "email": data.email}}
 
 @app.post("/api/auth/login")
 def login(data: LoginRequest):
-    """
-    Logs in an existing user.
-    POST /api/auth/login
-    Body: { email, password }
-    """
     with get_db() as db:
-        # Find user by email
-        user = db.execute(
-            "SELECT * FROM users WHERE email = ?", (data.email,)
-        ).fetchone()
-
-        # Check user exists AND password matches
+        user = db.execute("SELECT * FROM users WHERE email=?", (data.email,)).fetchone()
         if not user or not verify_password(data.password, user["password"]):
             raise HTTPException(status_code=401, detail="Invalid email or password")
-
-        # Create and return JWT token
         token = create_token(user["id"], user["email"], user["name"])
-        return {
-            "token": token,
-            "user": {"id": user["id"], "name": user["name"], "email": user["email"]}
-        }
+        return {"token": token, "user": {"id": user["id"], "name": user["name"], "email": user["email"]}}
 
 @app.get("/api/auth/me")
-def get_me(current_user = Depends(get_current_user)):
-    """
-    Returns current logged-in user info.
-    GET /api/auth/me
-    Requires: Authorization header with JWT token
-    """
+def get_me(current_user=Depends(get_current_user)):
     with get_db() as db:
-        user = db.execute(
-            "SELECT id, name, email, created_at FROM users WHERE id = ?",
-            (current_user["id"],)
-        ).fetchone()
+        user = db.execute("SELECT id,name,email,created_at FROM users WHERE id=?", (current_user["id"],)).fetchone()
         return dict(user)
 
-# ─── PURCHASES ROUTES ─────────────────────────────────────────
-
-@app.get("/api/purchases")
-def list_purchases(
-    from_date: Optional[str] = None,   # Optional filter: ?from_date=2026-01-01
-    to_date: Optional[str] = None,     # Optional filter: ?to_date=2026-12-31
-    current_user = Depends(get_current_user)
-):
+# ─── ITEMS (Master list) ──────────────────────────────────────
+@app.get("/api/items")
+def list_items(current_user=Depends(get_current_user)):
     """
-    Returns all purchases for the logged-in user.
-    GET /api/purchases
-    Optional query params: from_date, to_date
+    Returns all unique items the user has purchased.
+    These are the only items allowed to be sold.
     """
-    # Build query dynamically based on filters
-    query = "SELECT * FROM purchases WHERE user_id = ?"
-    params = [current_user["id"]]
-
-    if from_date:
-        query += " AND date >= ?"
-        params.append(from_date)
-    if to_date:
-        query += " AND date <= ?"
-        params.append(to_date)
-
-    query += " ORDER BY date DESC"
-
+    uid = current_user["id"]
     with get_db() as db:
-        rows = db.execute(query, params).fetchall()
-        return [dict(row) for row in rows]   # Convert to list of dicts
+        # Get items with available stock (purchased qty - sold qty)
+        rows = db.execute("""
+            SELECT
+                i.id,
+                i.name,
+                i.unit,
+                COALESCE(p.total_qty, 0) as purchased_qty,
+                COALESCE(s.total_qty, 0) as sold_qty,
+                COALESCE(p.total_qty, 0) - COALESCE(s.total_qty, 0) as available_qty,
+                COALESCE(p.avg_cost, 0) as avg_cost
+            FROM items i
+            LEFT JOIN (
+                SELECT item, SUM(qty) as total_qty, AVG(unit_cost) as avg_cost
+                FROM purchases WHERE user_id=? GROUP BY item
+            ) p ON p.item = i.name
+            LEFT JOIN (
+                SELECT item, SUM(qty) as total_qty
+                FROM sales WHERE user_id=? GROUP BY item
+            ) s ON s.item = i.name
+            WHERE i.user_id=?
+            ORDER BY i.name
+        """, (uid, uid, uid)).fetchall()
+        return [dict(r) for r in rows]
+
+# ─── PURCHASES ────────────────────────────────────────────────
+@app.get("/api/purchases")
+def list_purchases(from_date: Optional[str]=None, to_date: Optional[str]=None, current_user=Depends(get_current_user)):
+    query = "SELECT * FROM purchases WHERE user_id=?"
+    params = [current_user["id"]]
+    if from_date: query += " AND date>=?"; params.append(from_date)
+    if to_date:   query += " AND date<=?"; params.append(to_date)
+    with get_db() as db:
+        return [dict(r) for r in db.execute(query + " ORDER BY date DESC", params).fetchall()]
 
 @app.post("/api/purchases", status_code=201)
-def create_purchase(data: PurchaseCreate, current_user = Depends(get_current_user)):
-    """
-    Adds a new purchase record.
-    POST /api/purchases
-    Body: { date, supplier, item, qty, unit, unit_cost, notes }
-    """
-    total = data.qty * data.unit_cost   # Calculate total automatically
-
+def create_purchase(data: PurchaseCreate, current_user=Depends(get_current_user)):
+    uid = current_user["id"]
+    total = data.qty * data.unit_cost
     with get_db() as db:
+        # Auto-create item in master list if it doesn't exist
+        existing_item = db.execute(
+            "SELECT id FROM items WHERE user_id=? AND name=?", (uid, data.item)
+        ).fetchone()
+
+        if existing_item:
+            item_id = existing_item["id"]
+        else:
+            cursor = db.execute(
+                "INSERT INTO items (user_id, name, unit) VALUES (?,?,?)",
+                (uid, data.item, data.unit)
+            )
+            item_id = cursor.lastrowid
+
         cursor = db.execute(
-            """INSERT INTO purchases
-               (user_id, date, supplier, item, qty, unit, unit_cost, total, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (current_user["id"], data.date, data.supplier, data.item,
-             data.qty, data.unit, data.unit_cost, total, data.notes)
+            "INSERT INTO purchases (user_id,item_id,date,supplier,item,qty,unit,unit_cost,total,notes) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (uid, item_id, data.date, data.supplier, data.item, data.qty, data.unit, data.unit_cost, total, data.notes)
         )
         db.commit()
-
-        # Return the newly created record
-        row = db.execute(
-            "SELECT * FROM purchases WHERE id = ?", (cursor.lastrowid,)
-        ).fetchone()
-        return dict(row)
-
-@app.put("/api/purchases/{purchase_id}")
-def update_purchase(
-    purchase_id: int,
-    data: PurchaseCreate,
-    current_user = Depends(get_current_user)
-):
-    """
-    Updates an existing purchase.
-    PUT /api/purchases/5
-    """
-    with get_db() as db:
-        # Make sure this purchase belongs to the current user
-        existing = db.execute(
-            "SELECT * FROM purchases WHERE id = ? AND user_id = ?",
-            (purchase_id, current_user["id"])
-        ).fetchone()
-
-        if not existing:
-            raise HTTPException(status_code=404, detail="Purchase not found")
-
-        total = data.qty * data.unit_cost
-        db.execute(
-            """UPDATE purchases
-               SET date=?, supplier=?, item=?, qty=?, unit=?, unit_cost=?, total=?, notes=?
-               WHERE id=?""",
-            (data.date, data.supplier, data.item, data.qty, data.unit,
-             data.unit_cost, total, data.notes, purchase_id)
-        )
-        db.commit()
-
-        row = db.execute("SELECT * FROM purchases WHERE id = ?", (purchase_id,)).fetchone()
-        return dict(row)
+        return dict(db.execute("SELECT * FROM purchases WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 @app.delete("/api/purchases/{purchase_id}")
-def delete_purchase(purchase_id: int, current_user = Depends(get_current_user)):
-    """
-    Deletes a purchase record.
-    DELETE /api/purchases/5
-    """
+def delete_purchase(purchase_id: int, current_user=Depends(get_current_user)):
     with get_db() as db:
-        result = db.execute(
-            "DELETE FROM purchases WHERE id = ? AND user_id = ?",
-            (purchase_id, current_user["id"])
-        )
+        r = db.execute("DELETE FROM purchases WHERE id=? AND user_id=?", (purchase_id, current_user["id"]))
         db.commit()
-
-        if result.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Purchase not found")
-
+        if not r.rowcount: raise HTTPException(404, "Not found")
         return {"success": True}
 
-# ─── SALES ROUTES ─────────────────────────────────────────────
-
-@app.get("/api/sales")
-def list_sales(
-    from_date: Optional[str] = None,
-    to_date: Optional[str] = None,
-    current_user = Depends(get_current_user)
-):
-    """Returns all sales for the logged-in user."""
-    query = "SELECT * FROM sales WHERE user_id = ?"
-    params = [current_user["id"]]
-
-    if from_date:
-        query += " AND date >= ?"
-        params.append(from_date)
-    if to_date:
-        query += " AND date <= ?"
-        params.append(to_date)
-
-    query += " ORDER BY date DESC"
-
+# ─── CUSTOMERS ────────────────────────────────────────────────
+@app.get("/api/customers")
+def list_customers(current_user=Depends(get_current_user)):
     with get_db() as db:
-        rows = db.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
+        rows = db.execute(
+            "SELECT * FROM customers WHERE user_id=? ORDER BY name", (current_user["id"],)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
-@app.post("/api/sales", status_code=201)
-def create_sale(data: SaleCreate, current_user = Depends(get_current_user)):
-    """Adds a new sale record."""
-    total = data.qty * data.unit_price
-
+@app.post("/api/customers", status_code=201)
+def create_customer(data: CustomerCreate, current_user=Depends(get_current_user)):
     with get_db() as db:
         cursor = db.execute(
-            """INSERT INTO sales
-               (user_id, date, customer, item, qty, unit, unit_price, total, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (current_user["id"], data.date, data.customer, data.item,
-             data.qty, data.unit, data.unit_price, total, data.notes)
+            "INSERT INTO customers (user_id,name,phone,address) VALUES (?,?,?,?)",
+            (current_user["id"], data.name, data.phone, data.address)
         )
         db.commit()
+        return dict(db.execute("SELECT * FROM customers WHERE id=?", (cursor.lastrowid,)).fetchone())
 
-        row = db.execute(
-            "SELECT * FROM sales WHERE id = ?", (cursor.lastrowid,)
-        ).fetchone()
-        return dict(row)
-
-@app.put("/api/sales/{sale_id}")
-def update_sale(
-    sale_id: int,
-    data: SaleCreate,
-    current_user = Depends(get_current_user)
-):
-    """Updates an existing sale."""
+# ─── SALES ────────────────────────────────────────────────────
+@app.get("/api/sales")
+def list_sales(current_user=Depends(get_current_user)):
     with get_db() as db:
-        existing = db.execute(
-            "SELECT * FROM sales WHERE id = ? AND user_id = ?",
-            (sale_id, current_user["id"])
-        ).fetchone()
+        rows = db.execute(
+            "SELECT * FROM sales WHERE user_id=? ORDER BY date DESC", (current_user["id"],)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
-        if not existing:
-            raise HTTPException(status_code=404, detail="Sale not found")
-
-        total = data.qty * data.unit_price
-        db.execute(
-            """UPDATE sales
-               SET date=?, customer=?, item=?, qty=?, unit=?, unit_price=?, total=?, notes=?
-               WHERE id=?""",
-            (data.date, data.customer, data.item, data.qty, data.unit,
-             data.unit_price, total, data.notes, sale_id)
-        )
-        db.commit()
-
-        row = db.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
-        return dict(row)
-
-@app.delete("/api/sales/{sale_id}")
-def delete_sale(sale_id: int, current_user = Depends(get_current_user)):
-    """Deletes a sale record."""
-    with get_db() as db:
-        result = db.execute(
-            "DELETE FROM sales WHERE id = ? AND user_id = ?",
-            (sale_id, current_user["id"])
-        )
-        db.commit()
-
-        if result.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Sale not found")
-
-        return {"success": True}
-
-# ─── ANALYTICS ROUTES ─────────────────────────────────────────
-
-@app.get("/api/analytics/summary")
-def get_summary(current_user = Depends(get_current_user)):
-    """
-    Returns overall business summary.
-    GET /api/analytics/summary
-    """
+@app.post("/api/sales", status_code=201)
+def create_sale(data: SaleCreate, current_user=Depends(get_current_user)):
     uid = current_user["id"]
 
     with get_db() as db:
-        # Use SQL to calculate totals — Python reads the results
-        total_purchases = db.execute(
-            "SELECT COALESCE(SUM(total), 0) as val FROM purchases WHERE user_id = ?", (uid,)
-        ).fetchone()["val"]
-
-        total_sales = db.execute(
-            "SELECT COALESCE(SUM(total), 0) as val FROM sales WHERE user_id = ?", (uid,)
-        ).fetchone()["val"]
-
-        purchase_count = db.execute(
-            "SELECT COUNT(*) as c FROM purchases WHERE user_id = ?", (uid,)
-        ).fetchone()["c"]
-
-        sale_count = db.execute(
-            "SELECT COUNT(*) as c FROM sales WHERE user_id = ?", (uid,)
-        ).fetchone()["c"]
-
-        top_supplier = db.execute(
-            """SELECT supplier, SUM(total) as total FROM purchases
-               WHERE user_id = ? GROUP BY supplier ORDER BY total DESC LIMIT 1""",
-            (uid,)
+        # Check item exists in purchases
+        item_exists = db.execute(
+            "SELECT id FROM items WHERE user_id=? AND name=?", (uid, data.item)
         ).fetchone()
+        if not item_exists:
+            raise HTTPException(400, f"Item '{data.item}' not found in your purchases")
 
-        top_customer = db.execute(
-            """SELECT customer, SUM(total) as total FROM sales
-               WHERE user_id = ? GROUP BY customer ORDER BY total DESC LIMIT 1""",
-            (uid,)
+        # Check available stock
+        purchased = db.execute(
+            "SELECT COALESCE(SUM(qty),0) as qty FROM purchases WHERE user_id=? AND item=?",
+            (uid, data.item)
+        ).fetchone()["qty"]
+
+        sold = db.execute(
+            "SELECT COALESCE(SUM(qty),0) as qty FROM sales WHERE user_id=? AND item=?",
+            (uid, data.item)
+        ).fetchone()["qty"]
+
+        available = purchased - sold
+        if data.qty > available:
+            raise HTTPException(400, f"Not enough stock. Available: {available} {data.unit}")
+
+        total = data.qty * data.unit_price
+        paid = min(data.paid_amount, total)   # Can't pay more than total
+        due = total - paid
+
+        # Set payment status
+        if paid == 0:
+            status = "unpaid"
+        elif paid >= total:
+            status = "paid"
+        else:
+            status = "partial"
+
+        cursor = db.execute(
+            """INSERT INTO sales
+               (user_id,date,customer_name,customer_phone,customer_addr,
+                item,qty,unit,unit_price,total,paid_amount,due_amount,payment_status,notes)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (uid, data.date, data.customer_name, data.customer_phone,
+             data.customer_addr, data.item, data.qty, data.unit,
+             data.unit_price, total, paid, due, status, data.notes)
+        )
+
+        # Record initial payment if any
+        if paid > 0:
+            db.execute(
+                "INSERT INTO payments (sale_id,user_id,amount,date,notes) VALUES (?,?,?,?,?)",
+                (cursor.lastrowid, uid, paid, data.date, "Initial payment")
+            )
+
+        db.commit()
+        return dict(db.execute("SELECT * FROM sales WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+@app.delete("/api/sales/{sale_id}")
+def delete_sale(sale_id: int, current_user=Depends(get_current_user)):
+    with get_db() as db:
+        r = db.execute("DELETE FROM sales WHERE id=? AND user_id=?", (sale_id, current_user["id"]))
+        db.commit()
+        if not r.rowcount: raise HTTPException(404, "Not found")
+        return {"success": True}
+
+# ─── PAYMENTS (Partial payment recording) ─────────────────────
+@app.get("/api/sales/{sale_id}/payments")
+def get_payments(sale_id: int, current_user=Depends(get_current_user)):
+    """Get all payments made for a sale."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM payments WHERE sale_id=? AND user_id=? ORDER BY date",
+            (sale_id, current_user["id"])
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+@app.post("/api/sales/{sale_id}/payments", status_code=201)
+def add_payment(sale_id: int, data: PaymentCreate, current_user=Depends(get_current_user)):
+    """Record an additional payment for a sale (clears due amount)."""
+    uid = current_user["id"]
+    with get_db() as db:
+        sale = db.execute(
+            "SELECT * FROM sales WHERE id=? AND user_id=?", (sale_id, uid)
         ).fetchone()
+        if not sale:
+            raise HTTPException(404, "Sale not found")
 
+        if sale["due_amount"] <= 0:
+            raise HTTPException(400, "This sale is already fully paid")
+
+        # Don't allow overpayment
+        payment = min(data.amount, sale["due_amount"])
+        new_paid = sale["paid_amount"] + payment
+        new_due = sale["total"] - new_paid
+
+        # Update payment status
+        if new_due <= 0:
+            new_status = "paid"
+        else:
+            new_status = "partial"
+
+        db.execute(
+            "UPDATE sales SET paid_amount=?, due_amount=?, payment_status=? WHERE id=?",
+            (new_paid, max(0, new_due), new_status, sale_id)
+        )
+        db.execute(
+            "INSERT INTO payments (sale_id,user_id,amount,date,notes) VALUES (?,?,?,?,?)",
+            (sale_id, uid, payment, data.date, data.notes)
+        )
+        db.commit()
+
+        return dict(db.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone())
+
+# ─── ANALYTICS ────────────────────────────────────────────────
+@app.get("/api/analytics/summary")
+def get_summary(current_user=Depends(get_current_user)):
+    uid = current_user["id"]
+    with get_db() as db:
+        total_purchases = db.execute("SELECT COALESCE(SUM(total),0) as v FROM purchases WHERE user_id=?", (uid,)).fetchone()["v"]
+        total_sales     = db.execute("SELECT COALESCE(SUM(total),0) as v FROM sales WHERE user_id=?", (uid,)).fetchone()["v"]
+        total_collected = db.execute("SELECT COALESCE(SUM(paid_amount),0) as v FROM sales WHERE user_id=?", (uid,)).fetchone()["v"]
+        total_due       = db.execute("SELECT COALESCE(SUM(due_amount),0) as v FROM sales WHERE user_id=?", (uid,)).fetchone()["v"]
+        purchase_count  = db.execute("SELECT COUNT(*) as c FROM purchases WHERE user_id=?", (uid,)).fetchone()["c"]
+        sale_count      = db.execute("SELECT COUNT(*) as c FROM sales WHERE user_id=?", (uid,)).fetchone()["c"]
+        top_supplier    = db.execute("SELECT supplier, SUM(total) as total FROM purchases WHERE user_id=? GROUP BY supplier ORDER BY total DESC LIMIT 1", (uid,)).fetchone()
+        top_customer    = db.execute("SELECT customer_name, SUM(total) as total FROM sales WHERE user_id=? GROUP BY customer_name ORDER BY total DESC LIMIT 1", (uid,)).fetchone()
         return {
             "totalPurchases": total_purchases,
             "totalSales": total_sales,
-            "profit": total_sales - total_purchases,   # Simple math!
+            "totalCollected": total_collected,
+            "totalDue": total_due,
+            "profit": total_collected - total_purchases,
             "purchaseCount": purchase_count,
             "saleCount": sale_count,
             "topSupplier": dict(top_supplier) if top_supplier else None,
@@ -523,83 +468,48 @@ def get_summary(current_user = Depends(get_current_user)):
         }
 
 @app.get("/api/analytics/monthly")
-def get_monthly(current_user = Depends(get_current_user)):
-    """
-    Returns month-by-month breakdown.
-    GET /api/analytics/monthly
-    """
+def get_monthly(current_user=Depends(get_current_user)):
     uid = current_user["id"]
-
     with get_db() as db:
-        # Group purchases by month using SQLite's strftime function
-        p_data = db.execute(
-            """SELECT strftime('%Y-%m', date) as month, SUM(total) as total
-               FROM purchases WHERE user_id = ? GROUP BY month ORDER BY month""",
-            (uid,)
-        ).fetchall()
-
-        s_data = db.execute(
-            """SELECT strftime('%Y-%m', date) as month, SUM(total) as total
-               FROM sales WHERE user_id = ? GROUP BY month ORDER BY month""",
-            (uid,)
-        ).fetchall()
-
-        # Combine purchases and sales into one dictionary per month
+        p_data = db.execute("SELECT strftime('%Y-%m',date) as month, SUM(total) as total FROM purchases WHERE user_id=? GROUP BY month", (uid,)).fetchall()
+        s_data = db.execute("SELECT strftime('%Y-%m',date) as month, SUM(total) as total, SUM(paid_amount) as collected FROM sales WHERE user_id=? GROUP BY month", (uid,)).fetchall()
         months = {}
-        for row in p_data:
-            months[row["month"]] = {"month": row["month"], "purchases": row["total"], "sales": 0}
-        for row in s_data:
-            if row["month"] not in months:
-                months[row["month"]] = {"month": row["month"], "purchases": 0, "sales": 0}
-            months[row["month"]]["sales"] = row["total"]
-
-        # Add profit calculation for each month
+        for r in p_data:
+            months[r["month"]] = {"month": r["month"], "purchases": r["total"], "sales": 0, "collected": 0}
+        for r in s_data:
+            if r["month"] not in months:
+                months[r["month"]] = {"month": r["month"], "purchases": 0, "sales": 0, "collected": 0}
+            months[r["month"]]["sales"] = r["total"]
+            months[r["month"]]["collected"] = r["collected"]
         result = []
         for m in sorted(months.values(), key=lambda x: x["month"]):
-            m["profit"] = m["sales"] - m["purchases"]
+            m["profit"] = m["collected"] - m["purchases"]
             result.append(m)
-
         return result
 
 @app.get("/api/analytics/inventory")
-def get_inventory(current_user = Depends(get_current_user)):
-    """
-    Calculates current stock: purchased qty minus sold qty.
-    GET /api/analytics/inventory
-    """
+def get_inventory(current_user=Depends(get_current_user)):
     uid = current_user["id"]
-
     with get_db() as db:
-        bought = db.execute(
-            "SELECT item, SUM(qty) as qty FROM purchases WHERE user_id = ? GROUP BY item",
-            (uid,)
-        ).fetchall()
-
-        sold = db.execute(
-            "SELECT item, SUM(qty) as qty FROM sales WHERE user_id = ? GROUP BY item",
-            (uid,)
-        ).fetchall()
-
-        # Python dictionary to track stock levels
+        bought = db.execute("SELECT item, SUM(qty) as qty FROM purchases WHERE user_id=? GROUP BY item", (uid,)).fetchall()
+        sold   = db.execute("SELECT item, SUM(qty) as qty FROM sales WHERE user_id=? GROUP BY item", (uid,)).fetchall()
         stock = {}
-        for row in bought:
-            stock[row["item"]] = stock.get(row["item"], 0) + row["qty"]
-        for row in sold:
-            stock[row["item"]] = stock.get(row["item"], 0) - row["qty"]
+        for r in bought: stock[r["item"]] = stock.get(r["item"], 0) + r["qty"]
+        for r in sold:   stock[r["item"]] = stock.get(r["item"], 0) - r["qty"]
+        return [{"item": item, "qty": max(0, qty)} for item, qty in stock.items()]
 
-        # Return only items with stock >= 0
-        return [
-            {"item": item, "qty": max(0, qty)}
-            for item, qty in stock.items()
-        ]
+@app.get("/api/analytics/dues")
+def get_dues(current_user=Depends(get_current_user)):
+    """Returns all sales with pending due amounts."""
+    with get_db() as db:
+        rows = db.execute(
+            """SELECT * FROM sales
+               WHERE user_id=? AND due_amount > 0
+               ORDER BY date ASC""",
+            (current_user["id"],)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
-# ─── HEALTH CHECK ─────────────────────────────────────────────
 @app.get("/health")
 def health():
-    """Simple check to confirm the API is running."""
-    return {"status": "ok", "time": datetime.utcnow().isoformat(), "language": "Python 🐍"}
-
-# ─── API DOCS ─────────────────────────────────────────────────
-# FastAPI automatically generates interactive API docs!
-# Visit: https://your-railway-url.up.railway.app/docs
-# You can test all your API endpoints directly in the browser!
+    return {"status": "ok", "time": datetime.utcnow().isoformat(), "language": "Python 🐍", "version": "2.0"}
