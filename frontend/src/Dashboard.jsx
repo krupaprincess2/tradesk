@@ -129,6 +129,9 @@ export default function Dashboard(){
   const [showResetPwd,setShowResetPwd] = useState(null);
   const [showSupplier,setShowSupplier] = useState(false);
   const [showReturn,setShowReturn]     = useState(null);
+  const [showEditProd,setShowEditProd] = useState(null);  // product being edited
+  const [editProdForm,setEditProdForm] = useState({name:"",description:"",defined_price:"",unit:"pcs",qty_available:"",is_active:1});
+  const [editProdImage,setEditProdImage] = useState(null);
 
   // Forms
   const [pForm,setPForm]     = useState(emptyP);
@@ -317,6 +320,26 @@ export default function Dashboard(){
     finally{setSaving(false);}
   };
 
+  // Edit product
+  const openEditProduct = (prod) => {
+    setEditProdForm({name:prod.name,description:prod.description||"",defined_price:prod.defined_price,unit:prod.unit,qty_available:prod.qty_available,is_active:prod.is_active});
+    setEditProdImage(null);
+    setShowEditProd(prod);
+    setError("");
+  };
+
+  const saveEditProduct = async () => {
+    setError("");
+    if(!editProdForm.name||!editProdForm.defined_price){setError("Name and price required");return;}
+    setSaving(true);
+    try{
+      const res = await put(`/products/${showEditProd.id}`,{...editProdForm,defined_price:+editProdForm.defined_price,qty_available:+editProdForm.qty_available,is_active:+editProdForm.is_active});
+      if(editProdImage) await uploadImage(`/products/${res.id}/image`,editProdImage);
+      await loadAll(); setShowEditProd(null); setEditProdImage(null);
+    }catch(e){setError(e.message);}
+    finally{setSaving(false);}
+  };
+
   const saleTotal  = +sForm.qty * +sForm.unit_price || 0;
   const saleDue    = Math.max(0, saleTotal - +(sForm.paid_amount||0));
   const trendData  = monthly.map(m=>({...m,month:new Date(m.month+"-01").toLocaleString("default",{month:"short",year:"2-digit"})}));
@@ -494,15 +517,15 @@ export default function Dashboard(){
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                   <div>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Products</div>
-                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Define your final products and their prices — these appear in Sales</div>
+                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Final products for sale · all staff see and share the same list</div>
                   </div>
-                  {isAdmin&&<button onClick={()=>{setError("");setShowProdModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.purple,color:C.text,border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Product</button>}
+                  {isAdmin&&<button onClick={()=>{setError("");setProdForm(emptyProd);setProdImage(null);setShowProdModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.purple,color:C.text,border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Product</button>}
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:14}}>
                   {products.length===0
                     ? <div style={{color:C.muted,padding:40}}>No products yet. {isAdmin?"Add your first product!":"Ask admin to add products."}</div>
                     : products.map(prod=>(
-                    <div key={prod.id} style={{background:C.card,border:`1px solid ${prod.is_active?C.border:C.red+"44"}`,borderRadius:14,padding:18,width:200,position:"relative"}}>
+                    <div key={prod.id} style={{background:C.card,border:`1px solid ${!prod.is_active?C.red+"44":prod.qty_available<=0?C.orange+"55":C.border}`,borderRadius:14,padding:18,width:210,position:"relative"}}>
                       {prod.image_data
                         ? <img src={prod.image_data} alt={prod.name} style={{width:"100%",height:130,objectFit:"cover",borderRadius:8,marginBottom:12}}/>
                         : <div style={{width:"100%",height:130,background:C.card2,borderRadius:8,marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No image</div>}
@@ -510,7 +533,22 @@ export default function Dashboard(){
                       {prod.description&&<div style={{color:C.textDim,fontSize:12,marginBottom:8}}>{prod.description}</div>}
                       <div style={{color:C.accent,fontWeight:700,fontSize:18,fontFamily:"'Syne',sans-serif"}}>{fmt(prod.defined_price)}</div>
                       <div style={{color:C.textDim,fontSize:11,marginTop:2}}>per {prod.unit}</div>
-                      {!prod.is_active&&<div style={{color:C.red,fontSize:11,marginTop:4}}>● Inactive</div>}
+
+                      {/* Available qty badge */}
+                      <div style={{marginTop:10,background:prod.qty_available>0?C.green+"18":C.orange+"18",border:`1px solid ${prod.qty_available>0?C.green+"44":C.orange+"44"}`,borderRadius:7,padding:"5px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span style={{fontSize:11,color:C.textDim}}>In Stock</span>
+                        <span style={{fontSize:14,fontWeight:700,color:prod.qty_available>0?C.green:C.orange}}>{prod.qty_available} {prod.unit}</span>
+                      </div>
+
+                      {!prod.is_active&&<div style={{color:C.red,fontSize:11,marginTop:6}}>● Inactive</div>}
+
+                      {/* Action buttons */}
+                      {isAdmin&&(
+                        <div style={{display:"flex",gap:6,marginTop:10}}>
+                          <button onClick={()=>openEditProduct(prod)} style={{flex:1,background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:7,padding:"6px 0",color:C.blue,cursor:"pointer",fontSize:12,fontWeight:600}}>✏️ Edit</button>
+                          <button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:7,padding:"6px 10px",color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -814,7 +852,7 @@ export default function Dashboard(){
               <Field label="Select Product">
                 <SelectInput value={sForm.product_id} onChange={e=>onSelectProduct(e.target.value)}
                   placeholder="— Choose product —"
-                  options={products.filter(p=>p.is_active).map(p=>({value:p.id,label:`${p.name} — ${fmt(p.defined_price)} per ${p.unit}`}))}/>
+                  options={products.filter(p=>p.is_active).map(p=>({value:p.id,label:`${p.name} — ${fmt(p.defined_price)} · Stock: ${p.qty_available} ${p.unit}${p.qty_available<=0?" ⚠️ OUT OF STOCK":""}`}))}/>
               </Field>
             </div>
 
@@ -993,6 +1031,29 @@ export default function Dashboard(){
             <Field label="Return Date"><DatePicker value={returnForm.date} onChange={v=>setReturnForm(f=>({...f,date:v}))}/></Field>
             <Field label="Reason"><Input type="text" placeholder="Reason for return" value={returnForm.notes} onChange={e=>setReturnForm(f=>({...f,notes:e.target.value}))}/></Field>
             {saveBtn("Confirm Return",doReturn,C.orange)}
+          </Modal>
+        )}
+
+        {/* ── EDIT PRODUCT MODAL ── */}
+        {showEditProd&&(
+          <Modal title={`Edit Product — ${showEditProd.name}`} onClose={()=>setShowEditProd(null)}>
+            <Field label="Product Name"><Input type="text" value={editProdForm.name} onChange={e=>setEditProdForm(f=>({...f,name:e.target.value}))}/></Field>
+            <Field label="Description"><Input type="text" placeholder="Optional" value={editProdForm.description} onChange={e=>setEditProdForm(f=>({...f,description:e.target.value}))}/></Field>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <Field label="Defined Price (₹)"><Input type="number" value={editProdForm.defined_price} onChange={e=>setEditProdForm(f=>({...f,defined_price:e.target.value}))}/></Field>
+              <Field label="Unit"><Input type="text" value={editProdForm.unit} onChange={e=>setEditProdForm(f=>({...f,unit:e.target.value}))}/></Field>
+            </div>
+            <Field label="Available Quantity">
+              <Input type="number" placeholder="How many available to sell" value={editProdForm.qty_available} onChange={e=>setEditProdForm(f=>({...f,qty_available:e.target.value}))}/>
+              <div style={{fontSize:11,color:C.textDim,marginTop:4}}>💡 This is the stock available for sale. Decreases automatically when sold.</div>
+            </Field>
+            <Field label="Status">
+              <SelectInput value={String(editProdForm.is_active)} onChange={e=>setEditProdForm(f=>({...f,is_active:+e.target.value}))}
+                options={[{value:"1",label:"Active — visible in Sales"},{value:"0",label:"Inactive — hidden from Sales"}]}/>
+            </Field>
+            <ImageUpload label="Update Image (optional)" currentImage={editProdImage?URL.createObjectURL(editProdImage):showEditProd.image_data} onUpload={setEditProdImage}/>
+            {error&&<div style={{color:C.red,fontSize:12,marginBottom:10}}>{error}</div>}
+            {saveBtn("Save Changes",saveEditProduct,C.blue)}
           </Modal>
         )}
 
