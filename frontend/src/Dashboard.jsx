@@ -99,6 +99,7 @@ const emptyS = {date:today(),customer_name:"",customer_phone:"",customer_addr:""
 export default function Dashboard(){
   const {user,logout} = useAuth();
   const isAdmin = user?.role==="admin";
+  const canEditDelete = isAdmin || user?.can_edit_delete===1;
   const TABS = isAdmin ? ADMIN_TABS : STAFF_TABS;
 
   const [tab,setTab]             = useState(isAdmin?"Dashboard":"Purchases");
@@ -141,21 +142,25 @@ export default function Dashboard(){
   const [userForm,setUserForm] = useState({name:"",email:"",password:"",role:"staff"});
   const [resetPwd,setResetPwd] = useState({new_password:"",show:false});
   const [supplierForm,setSupplierForm] = useState({name:"",phone:"",address:"",notes:""});
-  const [returnForm,setReturnForm] = useState({date:today(),notes:""});
+  const [returnForm,setReturnForm] = useState({date:today(),notes:"",return_collected:0,return_owe:0});
 
   // Image states
   const [pImage,setPImage]   = useState(null);
   const [prodImage,setProdImage] = useState(null);
 
+  const [returnDues,setReturnDues]     = useState([]);
+  // Lightbox for image preview
+  const [lightboxImg,setLightboxImg]   = useState(null);
+
   // Customer search
-  const [custSearch,setCustSearch] = useState("");
-  const [custResults,setCustResults] = useState([]);
+  const [custSearch,setCustSearch]     = useState("");
+  const [custResults,setCustResults]   = useState([]);
   const [showCustDrop,setShowCustDrop] = useState(false);
 
-  const [saving,setSaving]           = useState(false);
-  const [error,setError]             = useState("");
+  const [saving,setSaving]             = useState(false);
+  const [error,setError]               = useState("");
   const [priceWarning,setPriceWarning] = useState("");
-  const [salesSearch,setSalesSearch] = useState("");
+  const [salesSearch,setSalesSearch]   = useState("");
   const [purchasesSearch,setPurchasesSearch] = useState("");
 
   const loadAll = async()=>{
@@ -165,14 +170,15 @@ export default function Dashboard(){
         get("/purchases"), get("/products"), get("/sales"),
         get("/analytics/dues"), get("/analytics/purchase-dues"),
         get("/suppliers"), get("/analytics/inventory"),
-        get("/customers"),
+        get("/customers"), get("/analytics/return-dues"),
       ];
       if(isAdmin) calls.push(get("/analytics/summary"), get("/analytics/monthly"), get("/users"));
-      const [p,pr,s,d,pd,sup,inv,cust,...rest] = await Promise.all(calls);
+      const [p,pr,s,d,pd,sup,inv,cust,rd,...rest] = await Promise.all(calls);
       setPurchases(Array.isArray(p)?p:[]); setProducts(Array.isArray(pr)?pr:[]);
       setSales(Array.isArray(s)?s:[]); setDues(Array.isArray(d)?d:[]);
       setPurchaseDues(Array.isArray(pd)?pd:[]); setSuppliers(Array.isArray(sup)?sup:[]);
       setInventory(Array.isArray(inv)?inv:[]); setCustomers(Array.isArray(cust)?cust:[]);
+      setReturnDues(Array.isArray(rd)?rd:[]);
       if(isAdmin){ setSummary(rest[0]||{}); setMonthly(Array.isArray(rest[1])?rest[1]:[]); setUsers(Array.isArray(rest[2])?rest[2]:[]); }
     }catch(e){console.error(e);}
     finally{setLoading(false);}
@@ -506,7 +512,15 @@ export default function Dashboard(){
                           <tr key={p.id} style={{borderBottom:`1px solid ${C.border}18`}}
                             onMouseEnter={e=>e.currentTarget.style.background="#ffffff05"}
                             onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                            <td style={{padding:"10px 10px"}}>{p.image_data?<img src={p.image_data} alt={p.item} style={{width:40,height:40,borderRadius:6,objectFit:"cover"}}/>:<div style={{width:40,height:40,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:10}}>No img</div>}</td>
+                            <td style={{padding:"10px 10px"}}>
+                              {p.image_data
+                                ? <img src={p.image_data} alt={p.item} onClick={()=>setLightboxImg(p.image_data)}
+                                    style={{width:40,height:40,borderRadius:6,objectFit:"cover",cursor:"pointer",transition:"transform 0.15s"}}
+                                    onMouseEnter={e=>e.target.style.transform="scale(1.12)"}
+                                    onMouseLeave={e=>e.target.style.transform="scale(1)"}
+                                    title="Click to enlarge"/>
+                                : <div style={{width:40,height:40,background:C.card2,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:9}}>No img</div>}
+                            </td>
                             <td style={{padding:"10px 10px",color:C.text,whiteSpace:"nowrap"}}>{fmtDate(p.date)}</td>
                             <td style={{padding:"10px 10px",color:C.text}}>{p.supplier_name}</td>
                             <td style={{padding:"10px 10px",color:C.text,fontWeight:600}}>{p.item}</td>
@@ -541,7 +555,7 @@ export default function Dashboard(){
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Products</div>
                     <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Final products for sale · all staff see and share the same list</div>
                   </div>
-                  {isAdmin&&<button onClick={()=>{setError("");setProdForm(emptyProd);setProdImage(null);setShowProdModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.purple,color:C.text,border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Product</button>}
+                  <button onClick={()=>{setError("");setProdForm(emptyProd);setProdImage(null);setShowProdModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.purple,color:C.text,border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Product</button>
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:14}}>
                   {products.length===0
@@ -567,7 +581,7 @@ export default function Dashboard(){
                       {/* Action buttons - edit for all, add/delete admin only */}
                       <div style={{display:"flex",gap:6,marginTop:10}}>
                         <button onClick={()=>openEditProduct(prod)} style={{flex:1,background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:7,padding:"6px 0",color:C.blue,cursor:"pointer",fontSize:12,fontWeight:600}}>✏️ Edit</button>
-                        {isAdmin&&<button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:7,padding:"6px 10px",color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>}
+                        {canEditDelete&&<button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:7,padding:"6px 10px",color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>}
                       </div>
                     </div>
                   ))}
@@ -727,6 +741,58 @@ export default function Dashboard(){
                 {dues.length===0&&purchaseDues.length===0&&(
                   <div style={{textAlign:"center",padding:60,color:C.muted}}><div style={{fontSize:36,marginBottom:10}}>🎉</div>No pending dues!</div>
                 )}
+
+                {/* Return Refunds Owed */}
+                {returnDues.length>0&&(
+                  <div style={{marginTop:24}}>
+                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,marginBottom:12,color:C.purple}}>
+                      Refunds Owed to Customers — {fmt(returnDues.reduce((a,r)=>a+(r.return_owe-r.return_paid_back),0))}
+                    </div>
+                    <div style={{display:"grid",gap:10}}>
+                      {returnDues.map(r=>{
+                        const owed=r.return_owe||0;
+                        const paidBack=r.return_paid_back||0;
+                        const remaining=Math.max(0,owed-paidBack);
+                        return(
+                        <div key={r.id} style={{background:C.card,border:`1px solid ${C.purple}44`,borderRadius:12,padding:"16px 20px"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:10}}>
+                            <div>
+                              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15}}>{r.customer_name}</div>
+                              <div style={{color:C.textDim,fontSize:12,marginTop:3}}>{r.product_name} × {r.qty} · Returned {fmtDate(r.return_date)}</div>
+                              {r.customer_phone&&<div style={{color:C.textDim,fontSize:12,marginTop:2,display:"flex",alignItems:"center",gap:3}}><Phone size={9}/>{r.customer_phone}</div>}
+                            </div>
+                            <div style={{textAlign:"right"}}>
+                              <div style={{fontSize:10,color:C.textDim}}>ORIGINAL SALE</div>
+                              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14}}>{fmt(r.total)}</div>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:12,fontSize:12,marginBottom:10,background:C.card2,borderRadius:8,padding:"10px 14px",flexWrap:"wrap"}}>
+                            <div><div style={{color:C.textDim,fontSize:10}}>CUSTOMER PAID</div><div style={{fontWeight:700,color:C.green,fontSize:15}}>{fmt(r.return_collected)}</div></div>
+                            <div style={{color:C.border,fontSize:18,alignSelf:"center"}}>→</div>
+                            <div><div style={{color:C.textDim,fontSize:10}}>YOU OWE BACK</div><div style={{fontWeight:700,color:C.purple,fontSize:15}}>{fmt(owed)}</div></div>
+                            <div style={{color:C.border,fontSize:18,alignSelf:"center"}}>−</div>
+                            <div><div style={{color:C.textDim,fontSize:10}}>PAID BACK</div><div style={{fontWeight:700,color:C.blue,fontSize:15}}>{fmt(paidBack)}</div></div>
+                            <div style={{color:C.border,fontSize:18,alignSelf:"center"}}>=</div>
+                            <div><div style={{color:C.textDim,fontSize:10}}>STILL TO RETURN</div><div style={{fontWeight:700,color:remaining>0?C.red:C.green,fontSize:15}}>{remaining>0?fmt(remaining):"✓ Done"}</div></div>
+                          </div>
+                          <PayBar paid={paidBack} total={owed}/>
+                          {remaining>0&&(
+                            <div style={{display:"flex",justifyContent:"flex-end",marginTop:10}}>
+                              <button onClick={()=>{
+                                const amt=prompt(`Refund amount to ${r.customer_name} (remaining: ₹${remaining}):`);
+                                if(!amt||isNaN(amt)) return;
+                                post(`/sales/${r.id}/return-payback`,{amount:+amt,date:today(),notes:"Refund to customer"})
+                                  .then(loadAll).catch(e=>alert(e.message));
+                              }} style={{background:C.purple,border:"none",borderRadius:8,padding:"8px 18px",cursor:"pointer",color:C.text,fontWeight:700,fontSize:12}}>
+                                + Record Refund Payment
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );})}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -789,15 +855,29 @@ export default function Dashboard(){
                   {users.map(u=>(
                     <div key={u.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,opacity:u.is_active?1:0.6}}>
                       <div>
-                        <div style={{fontWeight:700,fontSize:14,display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{fontWeight:700,fontSize:14,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                           {u.name}
                           <Badge label={u.role.toUpperCase()} color={u.role==="admin"?C.accent:C.blue}/>
+                          {u.role!=="admin"&&u.can_edit_delete===1&&<Badge label="✓ SPECIAL PERM" color={C.purple}/>}
                           {!u.is_active&&<Badge label="DISABLED" color={C.red}/>}
                         </div>
                         <div style={{color:C.textDim,fontSize:12,marginTop:3}}>{u.email}</div>
-                        <div style={{color:C.muted,fontSize:11,marginTop:2}}>Added: {fmtDate(u.created_at)}</div>
+                        <div style={{color:C.muted,fontSize:11,marginTop:2}}>
+                          Added: {fmtDate(u.created_at)}
+                          {u.role==="staff"&&<span style={{marginLeft:8,color:u.can_edit_delete?C.purple:C.muted}}>
+                            {u.can_edit_delete?"· Can edit & delete records":"· View + Add only"}
+                          </span>}
+                        </div>
                       </div>
-                      <div style={{display:"flex",gap:8}}>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {u.role!=="admin"&&(
+                          <button onClick={async()=>{
+                            const res=await put(`/users/${u.id}/toggle-permission`,{});
+                            await loadAll();
+                          }} style={{background:u.can_edit_delete?C.purple+"22":C.card2,border:`1px solid ${u.can_edit_delete?C.purple+"66":C.border}`,borderRadius:7,padding:"7px 14px",color:u.can_edit_delete?C.purple:C.textDim,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",gap:4}}>
+                            <Shield size={12}/>{u.can_edit_delete?"Revoke Edit Perm":"Grant Edit Perm"}
+                          </button>
+                        )}
                         <button onClick={()=>{setShowResetPwd(u);setResetPwd({new_password:"",show:false});}} style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:7,padding:"7px 14px",color:C.orange,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",gap:4}}><Shield size={12}/>Reset Password</button>
                         {u.role!=="admin"&&<button onClick={()=>toggleUser(u)} style={{background:u.is_active?C.red+"22":C.green+"22",border:`1px solid ${u.is_active?C.red:C.green}44`,borderRadius:7,padding:"7px 14px",color:u.is_active?C.red:C.green,cursor:"pointer",fontSize:12}}>{u.is_active?"Disable":"Enable"}</button>}
                       </div>
@@ -890,7 +970,7 @@ export default function Dashboard(){
 
         {/* ── ADD SALE MODAL ── */}
         {showSModal&&(
-          <Modal title="Add Sale" onClose={()=>setShowSModal(false)} wide>
+          <Modal title="Add Sale" onClose={()=>{setShowSModal(false);setPriceWarning("");}} wide>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <Field label="Date"><DatePicker value={sForm.date} onChange={v=>setSForm(f=>({...f,date:v}))}/></Field>
               <Field label="Select Product">
@@ -900,29 +980,9 @@ export default function Dashboard(){
               </Field>
             </div>
 
-            {/* Customer search */}
+            {/* Customer details - simple fields, no search popup */}
             <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
               <div style={{fontSize:11,color:C.textDim,marginBottom:10,letterSpacing:0.8}}>CUSTOMER DETAILS</div>
-              <Field label="Search by Name or Phone">
-                <div style={{position:"relative"}}>
-                  <Input type="text" placeholder="Type name or phone to search..." value={custSearch}
-                    onChange={e=>searchCustomers(e.target.value)}
-                    onFocus={()=>custResults.length>0&&setShowCustDrop(true)}/>
-                  {showCustDrop&&custResults.length>0&&(
-                    <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.card,border:`1px solid ${C.border}`,borderRadius:8,zIndex:50,maxHeight:160,overflowY:"auto"}}>
-                      {custResults.map(c=>(
-                        <div key={c.id} onClick={()=>selectCustomer(c)}
-                          style={{padding:"10px 14px",cursor:"pointer",fontSize:13,borderBottom:`1px solid ${C.border}18`}}
-                          onMouseEnter={e=>e.currentTarget.style.background=C.card2}
-                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                          <div style={{fontWeight:600}}>{c.name}</div>
-                          {c.phone&&<div style={{color:C.textDim,fontSize:11}}>{c.phone}</div>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </Field>
               <Field label="Customer Name"><Input type="text" placeholder="Full name" value={sForm.customer_name} onChange={e=>setSForm(f=>({...f,customer_name:e.target.value}))}/></Field>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                 <Field label="Phone"><Input type="text" placeholder="+91 99999 99999" value={sForm.customer_phone} onChange={e=>setSForm(f=>({...f,customer_phone:e.target.value}))}/></Field>
@@ -939,7 +999,6 @@ export default function Dashboard(){
               <Input type="number" placeholder="0" value={sForm.unit_price} onChange={e=>onChangeSalePrice(e.target.value)}/>
             </Field>
 
-            {/* Price warning */}
             {priceWarning&&(
               <div style={{background:`${C.orange}11`,border:`1px solid ${C.orange}55`,borderRadius:8,padding:"10px 14px",marginBottom:12,color:C.orange,fontSize:13,display:"flex",alignItems:"center",gap:8}}>
                 <AlertTriangle size={14}/>{priceWarning}
@@ -953,13 +1012,18 @@ export default function Dashboard(){
                   <span style={{color:C.textDim}}>Sale Total</span>
                   <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:16}}>{fmt(saleTotal)}</span>
                 </div>
-                <Field label="Paid Now (₹)"><Input type="number" placeholder="0 = unpaid" value={sForm.paid_amount} onChange={e=>setSForm(f=>({...f,paid_amount:e.target.value}))}/></Field>
+                <Field label="Paid Now (₹)"><Input type="number" placeholder="0 = record as unpaid" value={sForm.paid_amount} onChange={e=>setSForm(f=>({...f,paid_amount:e.target.value}))}/></Field>
+                {+sForm.paid_amount>0&&(
+                  <Field label="Payment Comment">
+                    <Input type="text" placeholder="e.g. Cash, UPI, Advance, Partial..." value={sForm.payment_notes||""} onChange={e=>setSForm(f=>({...f,payment_notes:e.target.value}))}/>
+                  </Field>
+                )}
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6}}>
                   <span style={{color:C.green}}>✓ Paid: {fmt(sForm.paid_amount||0)}</span>
-                  <span style={{color:C.red}}>Due: {fmt(saleDue)}</span>
+                  <span style={{color:saleDue>0?C.red:C.green}}>Due: {saleDue>0?fmt(saleDue):"Fully paid ✓"}</span>
                 </div>
                 <div style={{height:4,background:C.border,borderRadius:2,marginTop:8,overflow:"hidden"}}>
-                  <div style={{height:"100%",width:`${saleTotal>0?Math.min(100,((sForm.paid_amount||0)/saleTotal)*100):0}%`,background:C.green,borderRadius:2}}/>
+                  <div style={{height:"100%",width:`${saleTotal>0?Math.min(100,((+(sForm.paid_amount)||0)/saleTotal)*100):0}%`,background:C.green,borderRadius:2}}/>
                 </div>
               </div>
             )}
@@ -1069,12 +1133,51 @@ export default function Dashboard(){
         {/* ── RETURN MODAL ── */}
         {showReturn&&(
           <Modal title="Mark as Return" onClose={()=>setShowReturn(null)}>
-            <div style={{background:`${C.red}11`,border:`1px solid ${C.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:13,color:C.red}}>
-              This will mark the sale as returned. Sale amount was {fmt(showReturn.total)} to {showReturn.customer_name}.
+            {/* Sale summary */}
+            <div style={{background:C.card2,borderRadius:10,padding:"14px 16px",marginBottom:16}}>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>{showReturn.customer_name} — {showReturn.product_name}</div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}>
+                <div><div style={{fontSize:10,color:C.textDim}}>SALE TOTAL</div><div style={{fontWeight:700}}>{fmt(showReturn.total)}</div></div>
+                <div><div style={{fontSize:10,color:C.textDim}}>CUSTOMER PAID</div><div style={{fontWeight:700,color:C.green}}>{fmt(showReturn.paid_amount)}</div></div>
+                <div><div style={{fontSize:10,color:C.textDim}}>STILL DUE</div><div style={{fontWeight:700,color:showReturn.due_amount>0?C.red:C.muted}}>{showReturn.due_amount>0?fmt(showReturn.due_amount):"—"}</div></div>
+              </div>
             </div>
+
             <Field label="Return Date"><DatePicker value={returnForm.date} onChange={v=>setReturnForm(f=>({...f,date:v}))}/></Field>
-            <Field label="Reason"><Input type="text" placeholder="Reason for return" value={returnForm.notes} onChange={e=>setReturnForm(f=>({...f,notes:e.target.value}))}/></Field>
-            {saveBtn("Confirm Return",doReturn,C.orange)}
+            <Field label="Reason / Notes"><Input type="text" placeholder="Reason for return" value={returnForm.notes} onChange={e=>setReturnForm(f=>({...f,notes:e.target.value}))}/></Field>
+
+            {/* Return financials */}
+            <div style={{background:`${C.orange}0d`,border:`1px solid ${C.orange}33`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+              <div style={{fontSize:11,color:C.orange,fontWeight:700,marginBottom:10,letterSpacing:0.8}}>💰 RETURN FINANCIALS</div>
+              <Field label="Amount Collected from Customer (₹)">
+                <Input type="number" placeholder="How much customer already paid" value={returnForm.return_collected}
+                  onChange={e=>setReturnForm(f=>({...f,return_collected:e.target.value,return_owe:e.target.value}))}/>
+                <div style={{fontSize:11,color:C.textDim,marginTop:3}}>Auto-filled from paid amount: {fmt(showReturn.paid_amount)}</div>
+              </Field>
+              <Field label="Amount to Repay to Customer (₹)">
+                <Input type="number" placeholder="How much you owe back to customer"
+                  value={returnForm.return_owe}
+                  onChange={e=>setReturnForm(f=>({...f,return_owe:e.target.value}))}/>
+                <div style={{fontSize:11,color:C.textDim,marginTop:3}}>Usually same as collected. Adjust if you're deducting any charges.</div>
+              </Field>
+              {(+returnForm.return_owe > 0) && (
+                <div style={{background:`${C.red}11`,border:`1px solid ${C.red}33`,borderRadius:7,padding:"8px 12px",fontSize:12,color:C.red}}>
+                  ⚠️ You will owe <strong>{fmt(returnForm.return_owe)}</strong> back to {showReturn.customer_name}. This will be tracked in Dues.
+                </div>
+              )}
+            </div>
+
+            {saveBtn("Confirm Return", ()=>{
+              const form = {...returnForm,
+                return_collected: +(returnForm.return_collected||showReturn.paid_amount),
+                return_owe: +(returnForm.return_owe||showReturn.paid_amount)
+              };
+              setSaving(true);
+              post(`/sales/${showReturn.id}/return`, form)
+                .then(()=>{loadAll();setShowReturn(null);setReturnForm({date:today(),notes:"",return_collected:0,return_owe:0});})
+                .catch(e=>alert(e.message))
+                .finally(()=>setSaving(false));
+            }, C.orange)}
           </Modal>
         )}
 
@@ -1139,6 +1242,21 @@ export default function Dashboard(){
               <div style={{textAlign:"center",color:C.muted,fontSize:11,marginTop:14}}>Thank you for your business!</div>
             </div>
           </Modal>
+        )}
+
+        {/* ── IMAGE LIGHTBOX ── */}
+        {lightboxImg&&(
+          <div onClick={()=>setLightboxImg(null)}
+            style={{position:"fixed",inset:0,background:"#000000ee",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",cursor:"zoom-out"}}>
+            <div style={{position:"relative",maxWidth:"92vw",maxHeight:"92vh"}}>
+              <img src={lightboxImg} alt="Preview"
+                style={{maxWidth:"92vw",maxHeight:"92vh",borderRadius:14,objectFit:"contain",boxShadow:"0 0 60px #000a"}}
+                onClick={e=>e.stopPropagation()}/>
+              <button onClick={()=>setLightboxImg(null)}
+                style={{position:"absolute",top:-14,right:-14,background:C.card,border:`1px solid ${C.border}`,borderRadius:"50%",width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:C.text,fontSize:16,fontWeight:700}}>×</button>
+              <div style={{textAlign:"center",marginTop:10,color:"#ffffff88",fontSize:12}}>Click anywhere outside to close</div>
+            </div>
+          </div>
         )}
 
       </div>

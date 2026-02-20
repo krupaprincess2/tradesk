@@ -26,13 +26,14 @@ def init_db():
     with get_db() as db:
         db.executescript("""
             CREATE TABLE IF NOT EXISTS users (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                name       TEXT NOT NULL,
-                email      TEXT UNIQUE NOT NULL,
-                password   TEXT NOT NULL,
-                role       TEXT NOT NULL DEFAULT 'staff',
-                is_active  INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT DEFAULT (datetime('now'))
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL,
+                email           TEXT UNIQUE NOT NULL,
+                password        TEXT NOT NULL,
+                role            TEXT NOT NULL DEFAULT 'staff',
+                is_active       INTEGER NOT NULL DEFAULT 1,
+                can_edit_delete INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT DEFAULT (datetime('now'))
             );
             CREATE TABLE IF NOT EXISTS suppliers (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +115,10 @@ def init_db():
                 due_amount     REAL NOT NULL DEFAULT 0,
                 payment_status TEXT NOT NULL DEFAULT 'unpaid',
                 is_return      INTEGER NOT NULL DEFAULT 0,
+                return_date    TEXT,
+                return_collected REAL NOT NULL DEFAULT 0,
+                return_owe     REAL NOT NULL DEFAULT 0,
+                return_paid_back REAL NOT NULL DEFAULT 0,
                 notes          TEXT,
                 created_at     TEXT DEFAULT (datetime('now'))
             );
@@ -132,6 +137,11 @@ def init_db():
         for sql in [
             "ALTER TABLE products ADD COLUMN qty_available REAL NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN can_edit_delete INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE sales ADD COLUMN return_date TEXT",
+            "ALTER TABLE sales ADD COLUMN return_collected REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE sales ADD COLUMN return_owe REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE sales ADD COLUMN return_paid_back REAL NOT NULL DEFAULT 0",
         ]:
             try: db.execute(sql); db.commit()
             except: pass
@@ -149,8 +159,9 @@ def verify_password(p, stored):
         return hmac.compare_digest(hashlib.pbkdf2_hmac('sha256', p.encode(), salt.encode(), 100000).hex(), h)
     except: return False
 
-def create_token(uid, email, name, role):
+def create_token(uid, email, name, role, can_edit_delete=0):
     return jwt.encode({"id":uid,"email":email,"name":name,"role":role,
+        "can_edit_delete": can_edit_delete,
         "exp":datetime.utcnow()+timedelta(days=7)}, JWT_SECRET, algorithm="HS256")
 
 def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
@@ -165,16 +176,16 @@ def require_admin(user=Depends(get_current_user)):
 # ── Models ────────────────────────────────────────────────────
 class RegisterReq(BaseModel): name:str; email:EmailStr; password:str
 class LoginReq(BaseModel): email:EmailStr; password:str
-class CreateUserReq(BaseModel): name:str; email:EmailStr; password:str; role:str="staff"
+class CreateUserReq(BaseModel): name:str; email:EmailStr; password:str; role:str="staff"; can_edit_delete:int=0
 class ResetPasswordReq(BaseModel): new_password:str
 class SupplierCreate(BaseModel): name:str; phone:Optional[str]=None; address:Optional[str]=None; notes:Optional[str]=None
 class PurchaseCreate(BaseModel): date:str; supplier_name:str; item:str; qty:float; unit:str="units"; unit_cost:float; paid_amount:float=0; low_stock_alert:float=0; notes:Optional[str]=None
 class PurchasePaymentCreate(BaseModel): amount:float; date:str; notes:Optional[str]=None
 class ProductCreate(BaseModel): name:str; description:Optional[str]=None; defined_price:float; unit:str="pcs"; qty_available:float=0; is_active:int=1
 class CustomerCreate(BaseModel): name:str; phone:Optional[str]=None; address:Optional[str]=None
-class SaleCreate(BaseModel): date:str; customer_name:str; customer_phone:Optional[str]=None; customer_addr:Optional[str]=None; product_id:Optional[int]=None; product_name:str; qty:float; unit:str="pcs"; defined_price:float=0; unit_price:float; paid_amount:float=0; notes:Optional[str]=None
+class SaleCreate(BaseModel): date:str; customer_name:str; customer_phone:Optional[str]=None; customer_addr:Optional[str]=None; product_id:Optional[int]=None; product_name:str; qty:float; unit:str="pcs"; defined_price:float=0; unit_price:float; paid_amount:float=0; payment_notes:Optional[str]=None; notes:Optional[str]=None
 class SalePaymentCreate(BaseModel): amount:float; date:str; notes:Optional[str]=None
-class SaleReturnCreate(BaseModel): date:str; notes:Optional[str]=None
+class SaleReturnCreate(BaseModel): date:str; notes:Optional[str]=None; return_collected:float=0; return_owe:float=0
 class QueryRequest(BaseModel): sql:str; password:str
 
 # ── Auth ──────────────────────────────────────────────────────
@@ -189,8 +200,8 @@ def register(data: RegisterReq):
         cur = db.execute("INSERT INTO users(name,email,password,role) VALUES(?,?,?,?)",
             (data.name, data.email, hash_password(data.password), role))
         db.commit()
-        return {"token": create_token(cur.lastrowid, data.email, data.name, role),
-                "user": {"id":cur.lastrowid,"name":data.name,"email":data.email,"role":role}}
+        return {"token": create_token(cur.lastrowid, data.email, data.name, role, 0),
+                "user": {"id":cur.lastrowid,"name":data.name,"email":data.email,"role":role,"can_edit_delete":0}}
 
 @app.post("/api/auth/login")
 def login(data: LoginReq):
@@ -199,8 +210,9 @@ def login(data: LoginReq):
         if not u or not verify_password(data.password, u["password"]):
             raise HTTPException(401, "Invalid email or password")
         if not u["is_active"]: raise HTTPException(403, "Account disabled")
-        return {"token": create_token(u["id"],u["email"],u["name"],u["role"]),
-                "user": {"id":u["id"],"name":u["name"],"email":u["email"],"role":u["role"]}}
+        ced = u["can_edit_delete"] if "can_edit_delete" in u.keys() else 0
+        return {"token": create_token(u["id"],u["email"],u["name"],u["role"],ced),
+                "user": {"id":u["id"],"name":u["name"],"email":u["email"],"role":u["role"],"can_edit_delete":ced}}
 
 @app.get("/api/auth/me")
 def get_me(user=Depends(get_current_user)):
@@ -211,7 +223,7 @@ def get_me(user=Depends(get_current_user)):
 @app.get("/api/users")
 def list_users(admin=Depends(require_admin)):
     with get_db() as db:
-        return [dict(r) for r in db.execute("SELECT id,name,email,role,is_active,created_at FROM users ORDER BY created_at").fetchall()]
+        return [dict(r) for r in db.execute("SELECT id,name,email,role,is_active,can_edit_delete,created_at FROM users ORDER BY created_at").fetchall()]
 
 @app.post("/api/users", status_code=201)
 def create_user(data: CreateUserReq, admin=Depends(require_admin)):
@@ -219,10 +231,21 @@ def create_user(data: CreateUserReq, admin=Depends(require_admin)):
     with get_db() as db:
         if db.execute("SELECT id FROM users WHERE email=?", (data.email,)).fetchone():
             raise HTTPException(409, "Email already exists")
-        cur = db.execute("INSERT INTO users(name,email,password,role) VALUES(?,?,?,?)",
-            (data.name, data.email, hash_password(data.password), data.role))
+        cur = db.execute("INSERT INTO users(name,email,password,role,can_edit_delete) VALUES(?,?,?,?,?)",
+            (data.name, data.email, hash_password(data.password), data.role, data.can_edit_delete))
         db.commit()
-        return dict(db.execute("SELECT id,name,email,role,is_active FROM users WHERE id=?", (cur.lastrowid,)).fetchone())
+        return dict(db.execute("SELECT id,name,email,role,is_active,can_edit_delete FROM users WHERE id=?", (cur.lastrowid,)).fetchone())
+
+@app.put("/api/users/{uid}/toggle-permission")
+def toggle_permission(uid:int, admin=Depends(require_admin)):
+    with get_db() as db:
+        u = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        if not u: raise HTTPException(404,"Not found")
+        if u["role"]=="admin": raise HTTPException(400,"Admin always has full permission")
+        ced = u["can_edit_delete"] if "can_edit_delete" in u.keys() else 0
+        new_ced = 0 if ced else 1
+        db.execute("UPDATE users SET can_edit_delete=? WHERE id=?", (new_ced, uid))
+        db.commit(); return {"can_edit_delete": new_ced}
 
 @app.put("/api/users/{uid}/reset-password")
 def reset_password(uid:int, data:ResetPasswordReq, admin=Depends(require_admin)):
@@ -333,7 +356,7 @@ def list_products(user=Depends(get_current_user)):
         return [dict(r) for r in db.execute("SELECT * FROM products ORDER BY name").fetchall()]
 
 @app.post("/api/products", status_code=201)
-def create_product(data:ProductCreate, admin=Depends(require_admin)):
+def create_product(data:ProductCreate, user=Depends(get_current_user)):
     with get_db() as db:
         cur = db.execute("INSERT INTO products(name,description,defined_price,unit,qty_available,is_active) VALUES(?,?,?,?,?,?)",
             (data.name,data.description,data.defined_price,data.unit,data.qty_available,data.is_active))
@@ -414,7 +437,7 @@ def create_sale(data:SaleCreate, user=Depends(get_current_user)):
              data.unit_price,total,paid,due,status,data.notes))
         if paid>0:
             db.execute("INSERT INTO sale_payments(sale_id,added_by,amount,date,notes) VALUES(?,?,?,?,?)",
-                (cur.lastrowid,user["id"],paid,data.date,"Initial payment"))
+                (cur.lastrowid,user["id"],paid,data.date, data.payment_notes or "Initial payment"))
         db.commit()
         return dict(db.execute("SELECT * FROM sales WHERE id=?", (cur.lastrowid,)).fetchone())
 
@@ -447,9 +470,28 @@ def return_sale(sid:int, data:SaleReturnCreate, user=Depends(get_current_user)):
         if s["is_return"]: raise HTTPException(400,"Already returned")
         if s["product_id"]:
             db.execute("UPDATE products SET qty_available=qty_available+? WHERE id=?", (s["qty"],s["product_id"]))
-        db.execute("UPDATE sales SET is_return=1,notes=? WHERE id=?",
-            (f"RETURNED on {data.date}: {data.notes or ''}",sid))
-        db.commit(); return {"success":True}
+        # return_owe = how much we owe back to customer (what they paid minus any restocking or fees)
+        return_owe = data.return_owe if data.return_owe > 0 else data.return_collected
+        db.execute("""UPDATE sales SET is_return=1, return_date=?, return_collected=?, return_owe=?,
+            return_paid_back=0, notes=? WHERE id=?""",
+            (data.date, data.return_collected, return_owe,
+             f"RETURNED on {data.date}: {data.notes or ''}", sid))
+        db.commit(); return dict(db.execute("SELECT * FROM sales WHERE id=?", (sid,)).fetchone())
+
+@app.post("/api/sales/{sid}/return-payback")
+def return_payback(sid:int, data:SalePaymentCreate, user=Depends(get_current_user)):
+    """Record money paid back to customer after a return."""
+    with get_db() as db:
+        s = db.execute("SELECT * FROM sales WHERE id=?", (sid,)).fetchone()
+        if not s: raise HTTPException(404,"Not found")
+        if not s["is_return"]: raise HTTPException(400,"Sale not returned")
+        already_paid_back = s["return_paid_back"] or 0
+        owe = s["return_owe"] or 0
+        remaining = max(0, owe - already_paid_back)
+        payment = min(data.amount, remaining)
+        new_paid_back = already_paid_back + payment
+        db.execute("UPDATE sales SET return_paid_back=? WHERE id=?", (new_paid_back, sid))
+        db.commit(); return dict(db.execute("SELECT * FROM sales WHERE id=?", (sid,)).fetchone())
 
 @app.delete("/api/sales/{sid}")
 def delete_sale(sid:int, user=Depends(get_current_user)):
@@ -508,6 +550,14 @@ def get_dues(user=Depends(get_current_user)):
 def get_purchase_dues(user=Depends(get_current_user)):
     with get_db() as db:
         return [dict(r) for r in db.execute("SELECT * FROM purchases WHERE due_amount>0 ORDER BY date").fetchall()]
+
+@app.get("/api/analytics/return-dues")
+def get_return_dues(user=Depends(get_current_user)):
+    """Sales that are returned and we still owe money back to customer."""
+    with get_db() as db:
+        return [dict(r) for r in db.execute(
+            "SELECT * FROM sales WHERE is_return=1 AND return_owe > return_paid_back ORDER BY return_date DESC"
+        ).fetchall()]
 
 @app.get("/api/analytics/inventory")
 def get_inventory(user=Depends(get_current_user)):
