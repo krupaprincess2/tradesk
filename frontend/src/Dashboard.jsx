@@ -152,9 +152,11 @@ export default function Dashboard(){
   const [custResults,setCustResults] = useState([]);
   const [showCustDrop,setShowCustDrop] = useState(false);
 
-  const [saving,setSaving] = useState(false);
-  const [error,setError]   = useState("");
+  const [saving,setSaving]           = useState(false);
+  const [error,setError]             = useState("");
   const [priceWarning,setPriceWarning] = useState("");
+  const [salesSearch,setSalesSearch] = useState("");
+  const [purchasesSearch,setPurchasesSearch] = useState("");
 
   const loadAll = async()=>{
     setLoading(true);
@@ -461,28 +463,46 @@ export default function Dashboard(){
             {/* ── PURCHASES ── */}
             {tab==="Purchases"&&(
               <div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Raw Material Purchases</div>
-                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Track raw goods with partial payments and images</div>
+                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Track raw goods with partial payments and images · {purchases.length} total</div>
                   </div>
                   <button onClick={()=>{setError("");setShowPModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.accent,color:"#0a0a0f",border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Purchase</button>
                 </div>
                 {purchaseDues.length>0&&(
-                  <div style={{background:`${C.orange}0d`,border:`1px solid ${C.orange}33`,borderRadius:10,padding:"10px 16px",marginBottom:14,fontSize:12,color:C.orange}}>
+                  <div style={{background:`${C.orange}0d`,border:`1px solid ${C.orange}33`,borderRadius:10,padding:"10px 16px",marginBottom:12,fontSize:12,color:C.orange}}>
                     ⚠️ Supplier dues pending: <strong>{fmt(totalPurchaseDues)}</strong> from {purchaseDues.length} purchase(s)
                   </div>
                 )}
+
+                {/* Search bar */}
+                <div style={{position:"relative",marginBottom:14}}>
+                  <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
+                  <input type="text" placeholder="Search by supplier name or item..." value={purchasesSearch}
+                    onChange={e=>setPurchasesSearch(e.target.value)}
+                    style={{...iStyle,paddingLeft:36,paddingRight:purchasesSearch?36:13}}/>
+                  {purchasesSearch&&<button onClick={()=>setPurchasesSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.muted}}><X size={14}/></button>}
+                </div>
+
                 <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:20}}>
+                  {(()=>{
+                    const filtered = purchasesSearch.trim()
+                      ? purchases.filter(p=>
+                          p.supplier_name?.toLowerCase().includes(purchasesSearch.toLowerCase()) ||
+                          p.item?.toLowerCase().includes(purchasesSearch.toLowerCase()))
+                      : purchases;
+                    return (
                   <div style={{overflowX:"auto"}}>
+                    {purchasesSearch&&<div style={{fontSize:11,color:C.textDim,marginBottom:10}}>{filtered.length} result{filtered.length!==1?"s":""} for "{purchasesSearch}"</div>}
                     <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                       <thead><tr style={{borderBottom:`1px solid ${C.border}`}}>
                         {["Image","Date","Supplier","Item","Qty","Total","Paid","Due","Status","Actions"].map(c=><th key={c} style={{padding:"8px 10px",textAlign:"left",color:C.textDim,fontWeight:500,fontSize:10,letterSpacing:0.7,textTransform:"uppercase",whiteSpace:"nowrap"}}>{c}</th>)}
                       </tr></thead>
                       <tbody>
-                        {purchases.length===0
-                          ? <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.muted}}>📭 No purchases yet</td></tr>
-                          : purchases.map((p,i)=>(
+                        {filtered.length===0
+                          ? <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.muted}}>{purchasesSearch?"🔍 No results found":"📭 No purchases yet"}</td></tr>
+                          : filtered.map((p,i)=>(
                           <tr key={p.id} style={{borderBottom:`1px solid ${C.border}18`}}
                             onMouseEnter={e=>e.currentTarget.style.background="#ffffff05"}
                             onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
@@ -499,7 +519,7 @@ export default function Dashboard(){
                               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                                 <button onClick={()=>openHistory(p,"purchase")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"3px 8px",color:C.blue,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><History size={9}/>History</button>
                                 {p.due_amount>0&&<button onClick={()=>{setShowPurchasePay(p);setPayForm({amount:p.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
-                                {isAdmin&&<button onClick={()=>del(`/purchases/${p.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
+                                <button onClick={()=>del(`/purchases/${p.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>
                               </div>
                             </td>
                           </tr>
@@ -507,6 +527,8 @@ export default function Dashboard(){
                       </tbody>
                     </table>
                   </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -542,13 +564,11 @@ export default function Dashboard(){
 
                       {!prod.is_active&&<div style={{color:C.red,fontSize:11,marginTop:6}}>● Inactive</div>}
 
-                      {/* Action buttons */}
-                      {isAdmin&&(
-                        <div style={{display:"flex",gap:6,marginTop:10}}>
-                          <button onClick={()=>openEditProduct(prod)} style={{flex:1,background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:7,padding:"6px 0",color:C.blue,cursor:"pointer",fontSize:12,fontWeight:600}}>✏️ Edit</button>
-                          <button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:7,padding:"6px 10px",color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
-                        </div>
-                      )}
+                      {/* Action buttons - edit for all, add/delete admin only */}
+                      <div style={{display:"flex",gap:6,marginTop:10}}>
+                        <button onClick={()=>openEditProduct(prod)} style={{flex:1,background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:7,padding:"6px 0",color:C.blue,cursor:"pointer",fontSize:12,fontWeight:600}}>✏️ Edit</button>
+                        {isAdmin&&<button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:7,padding:"6px 10px",color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -558,49 +578,73 @@ export default function Dashboard(){
             {/* ── SALES ── */}
             {tab==="Sales"&&(
               <div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Sales</div>
-                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Sell products · search customers · track partial payments</div>
+                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Sell products · track partial payments · {sales.length} total</div>
                   </div>
                   <button onClick={()=>{setError("");setPriceWarning("");setShowSModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.green,color:"#0a0a0f",border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Sale</button>
                 </div>
+
+                {/* Search bar above table */}
+                <div style={{position:"relative",marginBottom:14}}>
+                  <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
+                  <input
+                    type="text"
+                    placeholder="Search by customer name or phone number..."
+                    value={salesSearch}
+                    onChange={e=>setSalesSearch(e.target.value)}
+                    style={{...iStyle,paddingLeft:36,paddingRight:salesSearch?36:13}}
+                  />
+                  {salesSearch&&<button onClick={()=>setSalesSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.muted}}><X size={14}/></button>}
+                </div>
+
                 <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:20}}>
-                  <div style={{overflowX:"auto"}}>
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                      <thead><tr style={{borderBottom:`1px solid ${C.border}`}}>
-                        {["Date","Customer","Phone","Product","Qty","Total","Paid","Due","Status","Actions"].map(c=><th key={c} style={{padding:"8px 10px",textAlign:"left",color:C.textDim,fontWeight:500,fontSize:10,letterSpacing:0.7,textTransform:"uppercase",whiteSpace:"nowrap"}}>{c}</th>)}
-                      </tr></thead>
-                      <tbody>
-                        {sales.length===0
-                          ? <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.muted}}>📭 No sales yet</td></tr>
-                          : sales.map((s,i)=>(
-                          <tr key={s.id} style={{borderBottom:`1px solid ${C.border}18`,opacity:s.is_return?0.5:1}}
-                            onMouseEnter={e=>e.currentTarget.style.background="#ffffff05"}
-                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                            <td style={{padding:"10px 10px",color:C.text,whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
-                            <td style={{padding:"10px 10px",color:C.text}}>{s.customer_name}{s.is_return&&<span style={{color:C.red,fontSize:10,marginLeft:4}}>RETURNED</span>}</td>
-                            <td style={{padding:"10px 10px",color:C.textDim}}>{s.customer_phone||"—"}</td>
-                            <td style={{padding:"10px 10px",color:C.text,fontWeight:600}}>{s.product_name}</td>
-                            <td style={{padding:"10px 10px",color:C.text}}>{s.qty} {s.unit}</td>
-                            <td style={{padding:"10px 10px",fontWeight:600}}>{fmt(s.total)}</td>
-                            <td style={{padding:"10px 10px",color:C.green,fontWeight:600}}>{fmt(s.paid_amount)}</td>
-                            <td style={{padding:"10px 10px",color:s.due_amount>0?C.red:C.green,fontWeight:600}}>{s.due_amount>0?fmt(s.due_amount):"—"}</td>
-                            <td style={{padding:"10px 10px"}}><Badge label={payLabel(s.payment_status)} color={payColor(s.payment_status)}/></td>
-                            <td style={{padding:"10px 10px"}}>
-                              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                                <button onClick={()=>openHistory(s,"sale")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"3px 8px",color:C.blue,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><History size={9}/>History</button>
-                                <button onClick={()=>setShowInvoice({...s,idx:i})} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",color:C.textDim,cursor:"pointer",fontSize:10}}><FileText size={9}/></button>
-                                {s.due_amount>0&&!s.is_return&&<button onClick={()=>{setShowSalePay(s);setPayForm({amount:s.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
-                                {isAdmin&&!s.is_return&&<button onClick={()=>setShowReturn(s)} style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:5,padding:"3px 8px",color:C.orange,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><RotateCcw size={9}/>Return</button>}
-                                {isAdmin&&<button onClick={()=>del(`/sales/${s.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {(()=>{
+                    const filtered = salesSearch.trim()
+                      ? sales.filter(s=>
+                          s.customer_name?.toLowerCase().includes(salesSearch.toLowerCase()) ||
+                          s.customer_phone?.includes(salesSearch))
+                      : sales;
+                    return (
+                    <div style={{overflowX:"auto"}}>
+                      {salesSearch&&<div style={{fontSize:11,color:C.textDim,marginBottom:10}}>{filtered.length} result{filtered.length!==1?"s":""} for "{salesSearch}"</div>}
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                        <thead><tr style={{borderBottom:`1px solid ${C.border}`}}>
+                          {["Date","Customer","Phone","Product","Qty","Total","Paid","Due","Status","Actions"].map(c=><th key={c} style={{padding:"8px 10px",textAlign:"left",color:C.textDim,fontWeight:500,fontSize:10,letterSpacing:0.7,textTransform:"uppercase",whiteSpace:"nowrap"}}>{c}</th>)}
+                        </tr></thead>
+                        <tbody>
+                          {filtered.length===0
+                            ? <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.muted}}>{salesSearch?"🔍 No results found":"📭 No sales yet"}</td></tr>
+                            : filtered.map((s,i)=>(
+                            <tr key={s.id} style={{borderBottom:`1px solid ${C.border}18`,opacity:s.is_return?0.5:1}}
+                              onMouseEnter={e=>e.currentTarget.style.background="#ffffff05"}
+                              onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                              <td style={{padding:"10px 10px",color:C.text,whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
+                              <td style={{padding:"10px 10px",color:C.text}}>{s.customer_name}{s.is_return&&<span style={{color:C.red,fontSize:10,marginLeft:4}}>RETURNED</span>}</td>
+                              <td style={{padding:"10px 10px",color:C.textDim}}>{s.customer_phone||"—"}</td>
+                              <td style={{padding:"10px 10px",color:C.text,fontWeight:600}}>{s.product_name}</td>
+                              <td style={{padding:"10px 10px",color:C.text}}>{s.qty} {s.unit}</td>
+                              <td style={{padding:"10px 10px",fontWeight:600}}>{fmt(s.total)}</td>
+                              <td style={{padding:"10px 10px",color:C.green,fontWeight:600}}>{fmt(s.paid_amount)}</td>
+                              <td style={{padding:"10px 10px",color:s.due_amount>0?C.red:C.green,fontWeight:600}}>{s.due_amount>0?fmt(s.due_amount):"—"}</td>
+                              <td style={{padding:"10px 10px"}}><Badge label={payLabel(s.payment_status)} color={payColor(s.payment_status)}/></td>
+                              <td style={{padding:"10px 10px"}}>
+                                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                  <button onClick={()=>openHistory(s,"sale")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"3px 8px",color:C.blue,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><History size={9}/>History</button>
+                                  <button onClick={()=>setShowInvoice({...s,idx:i})} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",color:C.textDim,cursor:"pointer",fontSize:10}}><FileText size={9}/></button>
+                                  {s.due_amount>0&&!s.is_return&&<button onClick={()=>{setShowSalePay(s);setPayForm({amount:s.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
+                                  {!s.is_return&&<button onClick={()=>setShowReturn(s)} style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:5,padding:"3px 8px",color:C.orange,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><RotateCcw size={9}/>Return</button>}
+                                  <button onClick={()=>del(`/sales/${s.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}

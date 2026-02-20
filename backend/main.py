@@ -322,7 +322,7 @@ def get_purchase_payments(pid:int, user=Depends(get_current_user)):
         return [dict(r) for r in db.execute("SELECT * FROM purchase_payments WHERE purchase_id=? ORDER BY date",(pid,)).fetchall()]
 
 @app.delete("/api/purchases/{pid}")
-def delete_purchase(pid:int, admin=Depends(require_admin)):
+def delete_purchase(pid:int, user=Depends(get_current_user)):
     with get_db() as db:
         db.execute("DELETE FROM purchases WHERE id=?", (pid,)); db.commit(); return {"success":True}
 
@@ -341,7 +341,7 @@ def create_product(data:ProductCreate, admin=Depends(require_admin)):
         return dict(db.execute("SELECT * FROM products WHERE id=?", (cur.lastrowid,)).fetchone())
 
 @app.put("/api/products/{pid}")
-def update_product(pid:int, data:ProductCreate, admin=Depends(require_admin)):
+def update_product(pid:int, data:ProductCreate, user=Depends(get_current_user)):
     with get_db() as db:
         if not db.execute("SELECT id FROM products WHERE id=?", (pid,)).fetchone():
             raise HTTPException(404,"Not found")
@@ -349,8 +349,6 @@ def update_product(pid:int, data:ProductCreate, admin=Depends(require_admin)):
             (data.name,data.description,data.defined_price,data.unit,data.qty_available,data.is_active,pid))
         db.commit()
         return dict(db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone())
-
-@app.post("/api/products/{pid}/image")
 async def upload_product_image(pid:int, file:UploadFile=File(...), admin=Depends(require_admin)):
     contents = await file.read()
     if len(contents)>5*1024*1024: raise HTTPException(400,"Image too large (max 5MB)")
@@ -442,7 +440,7 @@ def get_sale_payments(sid:int, user=Depends(get_current_user)):
         return [dict(r) for r in db.execute("SELECT * FROM sale_payments WHERE sale_id=? ORDER BY date",(sid,)).fetchall()]
 
 @app.post("/api/sales/{sid}/return")
-def return_sale(sid:int, data:SaleReturnCreate, admin=Depends(require_admin)):
+def return_sale(sid:int, data:SaleReturnCreate, user=Depends(get_current_user)):
     with get_db() as db:
         s = db.execute("SELECT * FROM sales WHERE id=?", (sid,)).fetchone()
         if not s: raise HTTPException(404,"Not found")
@@ -454,7 +452,7 @@ def return_sale(sid:int, data:SaleReturnCreate, admin=Depends(require_admin)):
         db.commit(); return {"success":True}
 
 @app.delete("/api/sales/{sid}")
-def delete_sale(sid:int, admin=Depends(require_admin)):
+def delete_sale(sid:int, user=Depends(get_current_user)):
     with get_db() as db:
         s = db.execute("SELECT * FROM sales WHERE id=?", (sid,)).fetchone()
         if not s: raise HTTPException(404,"Not found")
