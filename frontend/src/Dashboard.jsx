@@ -475,7 +475,7 @@ export default function Dashboard(){
                             <td style={{padding:"10px 10px"}}>
                               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                                 <button onClick={()=>openHistory(p,"purchase")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"3px 8px",color:C.blue,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><History size={9}/>History</button>
-                                {p.due_amount>0&&<button onClick={()=>{setShowPurchasePay(p);setPayForm({amount:p.due_amount,date:today(),notes:"});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
+                                {p.due_amount>0&&<button onClick={()=>{setShowPurchasePay(p);setPayForm({amount:p.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
                                 {isAdmin&&<button onClick={()=>del(`/purchases/${p.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
                               </div>
                             </td>
@@ -553,7 +553,7 @@ export default function Dashboard(){
                               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                                 <button onClick={()=>openHistory(s,"sale")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"3px 8px",color:C.blue,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><History size={9}/>History</button>
                                 <button onClick={()=>setShowInvoice({...s,idx:i})} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",color:C.textDim,cursor:"pointer",fontSize:10}}><FileText size={9}/></button>
-                                {s.due_amount>0&&!s.is_return&&<button onClick={()=>{setShowSalePay(s);setPayForm({amount:s.due_amount,date:today(),notes:"});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
+                                {s.due_amount>0&&!s.is_return&&<button onClick={()=>{setShowSalePay(s);setPayForm({amount:s.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
                                 {isAdmin&&!s.is_return&&<button onClick={()=>setShowReturn(s)} style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:5,padding:"3px 8px",color:C.orange,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><RotateCcw size={9}/>Return</button>}
                                 {isAdmin&&<button onClick={()=>del(`/sales/${s.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
                               </div>
@@ -603,7 +603,7 @@ export default function Dashboard(){
                               <Badge label={payLabel(d.payment_status)} color={payColor(d.payment_status)}/>
                               <button onClick={()=>openHistory(d,"sale")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:6,padding:"4px 10px",color:C.blue,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:3}}><History size={10}/>Transactions</button>
                             </div>
-                            <button onClick={()=>{setShowSalePay(d);setPayForm({amount:d.due_amount,date:today(),notes:"});}} style={{background:C.green,border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",color:"#0a0a0f",fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:4}}><Plus size={12}/>Record Payment</button>
+                            <button onClick={()=>{setShowSalePay(d);setPayForm({amount:d.due_amount,date:today(),notes:""});}} style={{background:C.green,border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",color:"#0a0a0f",fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:4}}><Plus size={12}/>Record Payment</button>
                           </div>
                         </div>
                       ))}
@@ -634,7 +634,7 @@ export default function Dashboard(){
                           </div>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
                             <button onClick={()=>openHistory(p,"purchase")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:6,padding:"4px 10px",color:C.blue,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",gap:3}}><History size={10}/>Transactions</button>
-                            <button onClick={()=>{setShowPurchasePay(p);setPayForm({amount:p.due_amount,date:today(),notes:"});}} style={{background:C.orange,border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",color:"#0a0a0f",fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:4}}><Plus size={12}/>Pay Supplier</button>
+                            <button onClick={()=>{setShowPurchasePay(p);setPayForm({amount:p.due_amount,date:today(),notes:""});}} style={{background:C.orange,border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",color:"#0a0a0f",fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:4}}><Plus size={12}/>Pay Supplier</button>
                           </div>
                         </div>
                       ))}
