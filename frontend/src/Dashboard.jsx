@@ -570,19 +570,24 @@ export default function Dashboard(){
                       <div style={{color:C.accent,fontWeight:700,fontSize:18,fontFamily:"'Syne',sans-serif"}}>{fmt(prod.defined_price)}</div>
                       <div style={{color:C.textDim,fontSize:11,marginTop:2}}>per {prod.unit}</div>
 
-                      {/* Available qty badge */}
-                      <div style={{marginTop:10,background:prod.qty_available>0?C.green+"18":C.orange+"18",border:`1px solid ${prod.qty_available>0?C.green+"44":C.orange+"44"}`,borderRadius:7,padding:"5px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      {/* Stock badge - qty and unit clearly separated */}
+                      <div style={{marginTop:10,background:prod.qty_available>0?C.green+"18":C.orange+"18",border:`1px solid ${prod.qty_available>0?C.green+"44":C.orange+"44"}`,borderRadius:7,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                         <span style={{fontSize:11,color:C.textDim}}>In Stock</span>
-                        <span style={{fontSize:14,fontWeight:700,color:prod.qty_available>0?C.green:C.orange}}>{prod.qty_available} {prod.unit}</span>
+                        <span style={{fontWeight:700,color:prod.qty_available>0?C.green:C.orange}}>
+                          <span style={{fontSize:15}}>{prod.qty_available}</span>
+                          <span style={{fontSize:10,fontWeight:500,color:C.textDim,marginLeft:4}}>{prod.unit}</span>
+                        </span>
                       </div>
 
                       {!prod.is_active&&<div style={{color:C.red,fontSize:11,marginTop:6}}>● Inactive</div>}
 
-                      {/* Action buttons - edit for all, add/delete admin only */}
-                      <div style={{display:"flex",gap:6,marginTop:10}}>
-                        <button onClick={()=>openEditProduct(prod)} style={{flex:1,background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:7,padding:"6px 0",color:C.blue,cursor:"pointer",fontSize:12,fontWeight:600}}>✏️ Edit</button>
-                        {canEditDelete&&<button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:7,padding:"6px 10px",color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>}
-                      </div>
+                      {/* Edit + Delete — only for admin or staff with special permission */}
+                      {canEditDelete&&(
+                        <div style={{display:"flex",gap:6,marginTop:10}}>
+                          <button onClick={()=>openEditProduct(prod)} style={{flex:1,background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:7,padding:"6px 0",color:C.blue,cursor:"pointer",fontSize:12,fontWeight:600}}>✏️ Edit</button>
+                          <button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:7,padding:"6px 10px",color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
