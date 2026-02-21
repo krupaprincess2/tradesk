@@ -89,8 +89,8 @@ function ImageUpload({onUpload,currentImage,label="Upload Image"}){
 }
 
 // ── Tabs based on role ─────────────────────────────────────────
-const ADMIN_TABS = ["Dashboard","Purchases","Products","Sales","Dues","Inventory","Invoices","Users","Suppliers"];
-const STAFF_TABS = ["Purchases","Products","Sales","Dues","Inventory","Invoices"];
+const ADMIN_TABS = ["Dashboard","Raw Goods","Products","Orders","Dues","Inventory","Invoices","Users","Suppliers"];
+const STAFF_TABS = ["Raw Goods","Products","Orders","Dues","Inventory","Invoices"];
 
 const emptyP = {date:today(),supplier_name:"",item:"",qty:"",unit:"units",unit_cost:"",paid_amount:"",low_stock_alert:""};
 const emptyProd = {name:"",description:"",defined_price:"",unit:"pcs"};
@@ -102,7 +102,7 @@ export default function Dashboard(){
   const canEditDelete = isAdmin || user?.can_edit_delete===1;
   const TABS = isAdmin ? ADMIN_TABS : STAFF_TABS;
 
-  const [tab,setTab]             = useState(isAdmin?"Dashboard":"Purchases");
+  const [tab,setTab]             = useState(isAdmin?"Dashboard":"Raw Goods");
   const [purchases,setPurchases] = useState([]);
   const [products,setProducts]   = useState([]);
   const [sales,setSales]         = useState([]);
@@ -157,6 +157,14 @@ export default function Dashboard(){
   const [custResults,setCustResults]   = useState([]);
   const [showCustDrop,setShowCustDrop] = useState(false);
 
+  // Multi-product order items
+  const [orderItems,setOrderItems] = useState([{product_id:"",product_name:"",qty:"",unit:"pcs",unit_price:"",defined_price:0}]);
+  const [orderCustomer,setOrderCustomer] = useState({date:today(),customer_name:"",customer_phone:"",customer_addr:"",paid_amount:"",payment_notes:""});
+
+  // Product builder - ingredients from raw goods + custom charges
+  const [prodIngredients,setProdIngredients] = useState([]);
+  const [prodCharges,setProdCharges] = useState([]);
+  const [prodBuildMode,setProdBuildMode] = useState(false); // true = builder mode, false = simple mode
   const [saving,setSaving]             = useState(false);
   const [error,setError]               = useState("");
   const [priceWarning,setPriceWarning] = useState("");
@@ -232,17 +240,64 @@ export default function Dashboard(){
   // Add Product
   const addProduct = async()=>{
     setError("");
-    if(!prodForm.name||!prodForm.defined_price){setError("Name and price required");return;}
+    if(!prodForm.name){setError("Product name required");return;}
     setSaving(true);
     try{
-      const res = await post("/products",{...prodForm,defined_price:+prodForm.defined_price});
+      let res;
+      if(prodBuildMode){
+        // Builder mode: ingredients + charges, auto-calc price
+        if(prodIngredients.length===0&&prodCharges.length===0){setError("Add at least one ingredient or charge");setSaving(false);return;}
+        res = await post("/products/build",{
+          ...prodForm,
+          defined_price:0,  // backend calculates
+          ingredients: prodIngredients.filter(i=>i.item_name).map(i=>({...i,qty:+i.qty,unit_cost:+i.unit_cost})),
+          charges: prodCharges.filter(c=>c.label&&c.amount).map(c=>({...c,amount:+c.amount}))
+        });
+      } else {
+        if(!prodForm.defined_price){setError("Price required");setSaving(false);return;}
+        res = await post("/products",{...prodForm,defined_price:+prodForm.defined_price});
+      }
       if(prodImage) await uploadImage(`/products/${res.id}/image`,prodImage);
-      await loadAll(); setProdForm(emptyProd); setProdImage(null); setShowProdModal(false);
+      await loadAll();
+      setProdForm(emptyProd); setProdImage(null); setProdIngredients([]); setProdCharges([]); setProdBuildMode(false);
+      setShowProdModal(false);
     }catch(e){setError(e.message);}
     finally{setSaving(false);}
   };
 
-  // Add Sale
+  // Add multi-product Order
+  const addOrder = async()=>{
+    setError("");
+    if(!orderCustomer.date||!orderCustomer.customer_name){setError("Date and customer name required");return;}
+    const validItems = orderItems.filter(i=>i.product_name&&i.qty&&i.unit_price);
+    if(validItems.length===0){setError("Add at least one product with qty and price");return;}
+    setSaving(true);
+    try{
+      await post("/orders",{
+        date:orderCustomer.date,
+        customer_name:orderCustomer.customer_name,
+        customer_phone:orderCustomer.customer_phone,
+        customer_addr:orderCustomer.customer_addr,
+        paid_amount:+(orderCustomer.paid_amount||0),
+        payment_notes:orderCustomer.payment_notes,
+        items: validItems.map(i=>({
+          product_id:i.product_id||null,
+          product_name:i.product_name,
+          qty:+i.qty,
+          unit:i.unit||"pcs",
+          unit_price:+i.unit_price
+        }))
+      });
+      await loadAll();
+      setShowSModal(false);
+      setOrderItems([{product_id:"",product_name:"",qty:"",unit:"pcs",unit_price:"",defined_price:0}]);
+      setOrderCustomer({date:today(),customer_name:"",customer_phone:"",customer_addr:"",paid_amount:"",payment_notes:""});
+      setPriceWarning("");
+    }catch(e){setError(e.message);}
+    finally{setSaving(false);}
+  };
+
+  // Add Sale (legacy single-product)
   const addSale = async()=>{
     setError("");
     if(!sForm.date||!sForm.customer_name||!sForm.product_name||!sForm.qty||!sForm.unit_price){setError("Date, customer, product, qty and price required");return;}
@@ -350,6 +405,13 @@ export default function Dashboard(){
 
   const saleTotal  = +sForm.qty * +sForm.unit_price || 0;
   const saleDue    = Math.max(0, saleTotal - +(sForm.paid_amount||0));
+  // Order totals (multi-product)
+  const orderTotal = orderItems.reduce((sum,i)=>(sum + (+i.qty||0)*(+i.unit_price||0)),0);
+  const orderDue   = Math.max(0, orderTotal - +(orderCustomer.paid_amount||0));
+  // Product builder totals
+  const ingredientsCost = prodIngredients.reduce((sum,i)=>(sum + (+i.qty||0)*(+i.unit_cost||0)),0);
+  const chargesTotal = prodCharges.reduce((sum,c)=>(sum + (+c.amount||0)),0);
+  const builderTotal = ingredientsCost + chargesTotal;
   const trendData  = monthly.map(m=>({...m,month:new Date(m.month+"-01").toLocaleString("default",{month:"short",year:"2-digit"})}));
   const totalDues  = dues.reduce((a,d)=>a+d.due_amount,0);
   const totalPurchaseDues = purchaseDues.reduce((a,d)=>a+d.due_amount,0);
@@ -466,8 +528,8 @@ export default function Dashboard(){
               </div>
             )}
 
-            {/* ── PURCHASES ── */}
-            {tab==="Purchases"&&(
+            {/* ── RAW GOODS ── */}
+            {tab==="Raw Goods"&&(
               <div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div>
@@ -533,7 +595,7 @@ export default function Dashboard(){
                               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                                 <button onClick={()=>openHistory(p,"purchase")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"3px 8px",color:C.blue,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><History size={9}/>History</button>
                                 {p.due_amount>0&&<button onClick={()=>{setShowPurchasePay(p);setPayForm({amount:p.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
-                                <button onClick={()=>del(`/purchases/${p.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>
+                                {canEditDelete&&<button onClick={()=>del(`/purchases/${p.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
                               </div>
                             </td>
                           </tr>
@@ -594,15 +656,15 @@ export default function Dashboard(){
               </div>
             )}
 
-            {/* ── SALES ── */}
-            {tab==="Sales"&&(
+            {/* ── ORDERS ── */}
+            {tab==="Orders"&&(
               <div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div>
-                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Sales</div>
-                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Sell products · track partial payments · {sales.length} total</div>
+                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Orders</div>
+                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Create orders with multiple products · track payments · {sales.length} total</div>
                   </div>
-                  <button onClick={()=>{setError("");setPriceWarning("");setShowSModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.green,color:"#0a0a0f",border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Sale</button>
+                  <button onClick={()=>{setError("");setPriceWarning("");setShowSModal(true);setOrderItems([{product_id:"",product_name:"",qty:"",unit:"pcs",unit_price:"",defined_price:0}]);}} style={{display:"flex",alignItems:"center",gap:6,background:C.green,color:"#0a0a0f",border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>New Order</button>
                 </div>
 
                 {/* Search bar above table */}
@@ -654,7 +716,7 @@ export default function Dashboard(){
                                   <button onClick={()=>setShowInvoice({...s,idx:i})} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",color:C.textDim,cursor:"pointer",fontSize:10}}><FileText size={9}/></button>
                                   {s.due_amount>0&&!s.is_return&&<button onClick={()=>{setShowSalePay(s);setPayForm({amount:s.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
                                   {!s.is_return&&<button onClick={()=>setShowReturn(s)} style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:5,padding:"3px 8px",color:C.orange,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><RotateCcw size={9}/>Return</button>}
-                                  <button onClick={()=>del(`/sales/${s.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>
+                                  {canEditDelete&&<button onClick={()=>del(`/sales/${s.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
                                 </div>
                               </td>
                             </tr>
@@ -958,83 +1020,225 @@ export default function Dashboard(){
           </Modal>
         )}
 
-        {/* ── ADD PRODUCT MODAL ── */}
+        {/* ── ADD PRODUCT MODAL (with builder) ── */}
         {showProdModal&&(
-          <Modal title="Add Product" onClose={()=>setShowProdModal(false)}>
+          <Modal title="Add Product" onClose={()=>{setShowProdModal(false);setProdIngredients([]);setProdCharges([]);setProdBuildMode(false);}} wide>
+            {/* Toggle: simple vs builder */}
+            <div style={{display:"flex",gap:8,marginBottom:16,background:C.card2,borderRadius:10,padding:5}}>
+              <button onClick={()=>setProdBuildMode(false)} style={{flex:1,background:!prodBuildMode?C.purple:"transparent",border:"none",borderRadius:7,padding:"7px 0",color:!prodBuildMode?C.text:C.textDim,cursor:"pointer",fontSize:12,fontWeight:600,transition:"all 0.2s"}}>
+                📝 Simple (Enter Price)
+              </button>
+              <button onClick={()=>setProdBuildMode(true)} style={{flex:1,background:prodBuildMode?C.purple:"transparent",border:"none",borderRadius:7,padding:"7px 0",color:prodBuildMode?C.text:C.textDim,cursor:"pointer",fontSize:12,fontWeight:600,transition:"all 0.2s"}}>
+                🔧 Builder (Select Ingredients)
+              </button>
+            </div>
+
             <Field label="Product Name"><Input type="text" placeholder="e.g. Pearl Necklace, Gold Earring" value={prodForm.name} onChange={e=>setProdForm(f=>({...f,name:e.target.value}))}/></Field>
             <Field label="Description (optional)"><Input type="text" placeholder="Brief description" value={prodForm.description} onChange={e=>setProdForm(f=>({...f,description:e.target.value}))}/></Field>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <Field label="Defined Price (₹)"><Input type="number" placeholder="0" value={prodForm.defined_price} onChange={e=>setProdForm(f=>({...f,defined_price:e.target.value}))}/></Field>
+              {!prodBuildMode&&<Field label="Defined Price (₹)"><Input type="number" placeholder="0" value={prodForm.defined_price} onChange={e=>setProdForm(f=>({...f,defined_price:e.target.value}))}/></Field>}
               <Field label="Unit"><Input type="text" placeholder="pcs/set" value={prodForm.unit} onChange={e=>setProdForm(f=>({...f,unit:e.target.value}))}/></Field>
+              <Field label="Qty Available"><Input type="number" placeholder="0" value={prodForm.qty_available} onChange={e=>setProdForm(f=>({...f,qty_available:e.target.value}))}/></Field>
             </div>
+
+            {/* BUILDER MODE: ingredients + charges */}
+            {prodBuildMode&&(
+              <div>
+                {/* Raw Ingredients section */}
+                <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{fontSize:12,fontWeight:600,color:C.accent}}>🧪 Raw Material Ingredients</span>
+                    <button onClick={()=>setProdIngredients(arr=>[...arr,{item_name:"",qty:"",unit:"units",unit_cost:""}])}
+                      style={{background:C.accent+"22",border:`1px solid ${C.accent}44`,borderRadius:6,padding:"4px 10px",color:C.accent,cursor:"pointer",fontSize:11,fontWeight:600}}>+ Add Item</button>
+                  </div>
+                  {prodIngredients.length===0&&(
+                    <div style={{color:C.muted,fontSize:12,textAlign:"center",padding:"10px 0"}}>No ingredients yet. Click "Add Item" to select raw materials.</div>
+                  )}
+                  {prodIngredients.map((ing,idx)=>(
+                    <div key={idx} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr auto",gap:8,marginBottom:8,alignItems:"end"}}>
+                      <Field label={idx===0?"Item Name":""}>
+                        <SelectInput value={ing.item_name} onChange={e=>{
+                          const name=e.target.value;
+                          // Auto-fill unit from inventory
+                          const invItem = inventory.find(i=>i.name===name);
+                          setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,item_name:name,unit:invItem?.unit||x.unit}:x));
+                        }} placeholder="— Select item —" options={inventory.map(i=>({value:i.name,label:`${i.name} (${i.purchased} ${i.unit})`}))}/>
+                      </Field>
+                      <Field label={idx===0?"Qty":""}>
+                        <Input type="number" placeholder="0" value={ing.qty} onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/>
+                      </Field>
+                      <Field label={idx===0?"Unit":""}>
+                        <Input type="text" placeholder="pcs" value={ing.unit} onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,unit:e.target.value}:x))}/>
+                      </Field>
+                      <Field label={idx===0?"Cost/Unit (₹)":""}>
+                        <Input type="number" placeholder="0" value={ing.unit_cost} onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,unit_cost:e.target.value}:x))}/>
+                      </Field>
+                      <div style={{paddingBottom:2}}>
+                        <button onClick={()=>setProdIngredients(arr=>arr.filter((_,i)=>i!==idx))}
+                          style={{background:C.red+"22",border:`1px solid ${C.red}44`,borderRadius:6,padding:"8px 10px",color:C.red,cursor:"pointer",fontSize:11}}>✕</button>
+                      </div>
+                    </div>
+                  ))}
+                  {prodIngredients.length>0&&(
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6,paddingTop:8,borderTop:`1px solid ${C.border}`}}>
+                      <span style={{color:C.textDim}}>Ingredients Subtotal</span>
+                      <span style={{color:C.accent,fontWeight:700}}>{fmt(ingredientsCost)}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Extra charges section */}
+                <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <span style={{fontSize:12,fontWeight:600,color:C.orange}}>💰 Extra Charges</span>
+                    <button onClick={()=>setProdCharges(arr=>[...arr,{label:"",amount:""}])}
+                      style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:6,padding:"4px 10px",color:C.orange,cursor:"pointer",fontSize:11,fontWeight:600}}>+ Add Charge</button>
+                  </div>
+                  {prodCharges.length===0&&(
+                    <div style={{color:C.muted,fontSize:12,textAlign:"center",padding:"8px 0"}}>No charges yet. Add making charges, transport, etc.</div>
+                  )}
+                  {prodCharges.map((chg,idx)=>(
+                    <div key={idx} style={{display:"grid",gridTemplateColumns:"2fr 1fr auto",gap:8,marginBottom:8,alignItems:"end"}}>
+                      <Field label={idx===0?"Charge Name":""}>
+                        <Input type="text" placeholder="e.g. Making charges, Transport" value={chg.label} onChange={e=>setProdCharges(arr=>arr.map((x,i)=>i===idx?{...x,label:e.target.value}:x))}/>
+                      </Field>
+                      <Field label={idx===0?"Amount (₹)":""}>
+                        <Input type="number" placeholder="0" value={chg.amount} onChange={e=>setProdCharges(arr=>arr.map((x,i)=>i===idx?{...x,amount:e.target.value}:x))}/>
+                      </Field>
+                      <div style={{paddingBottom:2}}>
+                        <button onClick={()=>setProdCharges(arr=>arr.filter((_,i)=>i!==idx))}
+                          style={{background:C.red+"22",border:`1px solid ${C.red}44`,borderRadius:6,padding:"8px 10px",color:C.red,cursor:"pointer",fontSize:11}}>✕</button>
+                      </div>
+                    </div>
+                  ))}
+                  {prodCharges.length>0&&(
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6,paddingTop:8,borderTop:`1px solid ${C.border}`}}>
+                      <span style={{color:C.textDim}}>Charges Subtotal</span>
+                      <span style={{color:C.orange,fontWeight:700}}>{fmt(chargesTotal)}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Grand total */}
+                {builderTotal>0&&(
+                  <div style={{background:`${C.green}11`,border:`1px solid ${C.green}44`,borderRadius:10,padding:"12px 16px",marginBottom:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div>
+                        <div style={{fontSize:12,color:C.textDim,marginBottom:4}}>Calculated Product Price</div>
+                        <div style={{fontSize:11,color:C.textDim}}>Ingredients {fmt(ingredientsCost)} + Charges {fmt(chargesTotal)}</div>
+                      </div>
+                      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:22,color:C.green}}>{fmt(builderTotal)}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <ImageUpload label="Product Image (optional)" currentImage={prodImage?URL.createObjectURL(prodImage):null} onUpload={setProdImage}/>
             {error&&<div style={{color:C.red,fontSize:12,marginBottom:10}}>{error}</div>}
             {saveBtn("Save Product",addProduct,C.purple)}
           </Modal>
         )}
 
-        {/* ── ADD SALE MODAL ── */}
+        {/* ── NEW ORDER MODAL (multi-product) ── */}
         {showSModal&&(
-          <Modal title="Add Sale" onClose={()=>{setShowSModal(false);setPriceWarning("");}} wide>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <Field label="Date"><DatePicker value={sForm.date} onChange={v=>setSForm(f=>({...f,date:v}))}/></Field>
-              <Field label="Select Product">
-                <SelectInput value={sForm.product_id} onChange={e=>onSelectProduct(e.target.value)}
-                  placeholder="— Choose product —"
-                  options={products.filter(p=>p.is_active).map(p=>({value:p.id,label:`${p.name} — ${fmt(p.defined_price)} · Stock: ${p.qty_available} ${p.unit}${p.qty_available<=0?" ⚠️ OUT OF STOCK":""}`}))}/>
-              </Field>
-            </div>
+          <Modal title="New Order" onClose={()=>{setShowSModal(false);setPriceWarning("");}} wide>
 
-            {/* Customer details - simple fields, no search popup */}
-            <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+            {/* Date + Customer */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:4}}>
+              <Field label="Order Date"><DatePicker value={orderCustomer.date} onChange={v=>setOrderCustomer(f=>({...f,date:v}))}/></Field>
+            </div>
+            <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
               <div style={{fontSize:11,color:C.textDim,marginBottom:10,letterSpacing:0.8}}>CUSTOMER DETAILS</div>
-              <Field label="Customer Name"><Input type="text" placeholder="Full name" value={sForm.customer_name} onChange={e=>setSForm(f=>({...f,customer_name:e.target.value}))}/></Field>
+              <Field label="Customer Name"><Input type="text" placeholder="Full name" value={orderCustomer.customer_name} onChange={e=>setOrderCustomer(f=>({...f,customer_name:e.target.value}))}/></Field>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <Field label="Phone"><Input type="text" placeholder="+91 99999 99999" value={sForm.customer_phone} onChange={e=>setSForm(f=>({...f,customer_phone:e.target.value}))}/></Field>
-                <Field label="Address"><Input type="text" placeholder="City / Area" value={sForm.customer_addr} onChange={e=>setSForm(f=>({...f,customer_addr:e.target.value}))}/></Field>
+                <Field label="Phone"><Input type="text" placeholder="+91 99999 99999" value={orderCustomer.customer_phone} onChange={e=>setOrderCustomer(f=>({...f,customer_phone:e.target.value}))}/></Field>
+                <Field label="Address"><Input type="text" placeholder="City / Area" value={orderCustomer.customer_addr} onChange={e=>setOrderCustomer(f=>({...f,customer_addr:e.target.value}))}/></Field>
               </div>
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <Field label="Quantity"><Input type="number" placeholder="0" value={sForm.qty} onChange={e=>setSForm(f=>({...f,qty:e.target.value}))}/></Field>
-              <Field label="Unit"><Input type="text" value={sForm.unit} onChange={e=>setSForm(f=>({...f,unit:e.target.value}))}/></Field>
-            </div>
-
-            <Field label="Selling Price (₹) per unit">
-              <Input type="number" placeholder="0" value={sForm.unit_price} onChange={e=>onChangeSalePrice(e.target.value)}/>
-            </Field>
-
-            {priceWarning&&(
-              <div style={{background:`${C.orange}11`,border:`1px solid ${C.orange}55`,borderRadius:8,padding:"10px 14px",marginBottom:12,color:C.orange,fontSize:13,display:"flex",alignItems:"center",gap:8}}>
-                <AlertTriangle size={14}/>{priceWarning}
-                <span style={{color:C.textDim,fontSize:11}}>(You can still proceed)</span>
+            {/* Product line items */}
+            <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <span style={{fontSize:12,fontWeight:600,color:C.green}}>🛒 Order Items</span>
+                <button onClick={()=>setOrderItems(arr=>[...arr,{product_id:"",product_name:"",qty:"",unit:"pcs",unit_price:"",defined_price:0}])}
+                  style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:6,padding:"5px 12px",color:C.green,cursor:"pointer",fontSize:11,fontWeight:600}}>
+                  + Add Product
+                </button>
               </div>
-            )}
 
-            {saleTotal>0&&(
-              <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:10,fontSize:13}}>
-                  <span style={{color:C.textDim}}>Sale Total</span>
-                  <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:16}}>{fmt(saleTotal)}</span>
-                </div>
-                <Field label="Paid Now (₹)"><Input type="number" placeholder="0 = record as unpaid" value={sForm.paid_amount} onChange={e=>setSForm(f=>({...f,paid_amount:e.target.value}))}/></Field>
-                {+sForm.paid_amount>0&&(
-                  <Field label="Payment Comment">
-                    <Input type="text" placeholder="e.g. Cash, UPI, Advance, Partial..." value={sForm.payment_notes||""} onChange={e=>setSForm(f=>({...f,payment_notes:e.target.value}))}/>
+              {orderItems.map((item,idx)=>(
+                <div key={idx} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:9,padding:"12px 14px",marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <span style={{fontSize:11,color:C.textDim,fontWeight:600}}>Item #{idx+1}</span>
+                    {orderItems.length>1&&<button onClick={()=>setOrderItems(arr=>arr.filter((_,i)=>i!==idx))}
+                      style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>✕ Remove</button>}
+                  </div>
+                  <Field label="Select Product">
+                    <SelectInput value={item.product_id} onChange={e=>{
+                      const pid=e.target.value;
+                      const prod=products.find(p=>String(p.id)===String(pid));
+                      setOrderItems(arr=>arr.map((x,i)=>i===idx?{...x,
+                        product_id:pid,
+                        product_name:prod?.name||"",
+                        unit:prod?.unit||"pcs",
+                        unit_price:prod?.defined_price||"",
+                        defined_price:prod?.defined_price||0
+                      }:x));
+                    }} placeholder="— Choose product —"
+                    options={products.filter(p=>p.is_active).map(p=>({value:p.id,label:`${p.name} — ${fmt(p.defined_price)} · Stock: ${p.qty_available} ${p.unit}${p.qty_available<=0?" ⚠️ OUT":""}`}))}/>
                   </Field>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    <Field label="Qty"><Input type="number" placeholder="0" value={item.qty} onChange={e=>setOrderItems(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/></Field>
+                    <Field label="Unit"><Input type="text" value={item.unit} onChange={e=>setOrderItems(arr=>arr.map((x,i)=>i===idx?{...x,unit:e.target.value}:x))}/></Field>
+                    <Field label="Price/Unit (₹)">
+                      <Input type="number" placeholder="0" value={item.unit_price} onChange={e=>{
+                        const price=e.target.value;
+                        setOrderItems(arr=>arr.map((x,i)=>i===idx?{...x,unit_price:price}:x));
+                        if(item.defined_price>0 && +price < item.defined_price)
+                          setPriceWarning(`⚠️ Item #${idx+1} price below defined price (${fmt(item.defined_price)})`);
+                        else setPriceWarning("");
+                      }}/>
+                    </Field>
+                  </div>
+                  {item.qty&&item.unit_price&&(
+                    <div style={{display:"flex",justifyContent:"flex-end",fontSize:12,color:C.accent,fontWeight:600,marginTop:4}}>
+                      Item total: {fmt(+item.qty * +item.unit_price)}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {priceWarning&&(
+                <div style={{background:`${C.orange}11`,border:`1px solid ${C.orange}55`,borderRadius:8,padding:"8px 12px",marginTop:6,color:C.orange,fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+                  <AlertTriangle size={12}/>{priceWarning}<span style={{color:C.textDim,fontSize:10}}>(can still proceed)</span>
+                </div>
+              )}
+            </div>
+
+            {/* Order total + payment */}
+            {orderTotal>0&&(
+              <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <span style={{color:C.textDim,fontSize:13}}>Order Total ({orderItems.filter(i=>i.qty&&i.unit_price).length} item{orderItems.filter(i=>i.qty&&i.unit_price).length!==1?"s":""})</span>
+                  <span style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:20,color:C.text}}>{fmt(orderTotal)}</span>
+                </div>
+                <Field label="Paid Now (₹)"><Input type="number" placeholder="0 = unpaid" value={orderCustomer.paid_amount} onChange={e=>setOrderCustomer(f=>({...f,paid_amount:e.target.value}))}/></Field>
+                {+(orderCustomer.paid_amount||0)>0&&(
+                  <Field label="Payment Comment"><Input type="text" placeholder="e.g. Cash, UPI, Advance..." value={orderCustomer.payment_notes} onChange={e=>setOrderCustomer(f=>({...f,payment_notes:e.target.value}))}/></Field>
                 )}
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6}}>
-                  <span style={{color:C.green}}>✓ Paid: {fmt(sForm.paid_amount||0)}</span>
-                  <span style={{color:saleDue>0?C.red:C.green}}>Due: {saleDue>0?fmt(saleDue):"Fully paid ✓"}</span>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:8}}>
+                  <span style={{color:C.green}}>✓ Paid: {fmt(orderCustomer.paid_amount||0)}</span>
+                  <span style={{color:orderDue>0?C.red:C.green}}>Due: {orderDue>0?fmt(orderDue):"Fully paid ✓"}</span>
                 </div>
                 <div style={{height:4,background:C.border,borderRadius:2,marginTop:8,overflow:"hidden"}}>
-                  <div style={{height:"100%",width:`${saleTotal>0?Math.min(100,((+(sForm.paid_amount)||0)/saleTotal)*100):0}%`,background:C.green,borderRadius:2}}/>
+                  <div style={{height:"100%",width:`${orderTotal>0?Math.min(100,((+(orderCustomer.paid_amount)||0)/orderTotal)*100):0}%`,background:C.green,borderRadius:2,transition:"width 0.2s"}}/>
                 </div>
               </div>
             )}
 
             {error&&<div style={{color:C.red,fontSize:12,marginBottom:10}}>{error}</div>}
-            {saveBtn("Save Sale",addSale,C.green)}
+            {saveBtn("Place Order",addOrder,C.green)}
           </Modal>
         )}
 
