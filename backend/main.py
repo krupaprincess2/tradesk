@@ -131,6 +131,33 @@ def init_db():
                 notes      TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS product_ingredients (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id  INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+                item_name   TEXT NOT NULL,
+                qty         REAL NOT NULL,
+                unit        TEXT NOT NULL DEFAULT 'units',
+                unit_cost   REAL NOT NULL DEFAULT 0,
+                created_at  TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS product_charges (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id  INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+                label       TEXT NOT NULL,
+                amount      REAL NOT NULL,
+                created_at  TEXT DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS order_items (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                sale_id     INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+                product_id  INTEGER REFERENCES products(id),
+                product_name TEXT NOT NULL,
+                qty         REAL NOT NULL,
+                unit        TEXT NOT NULL DEFAULT 'pcs',
+                unit_price  REAL NOT NULL,
+                total       REAL NOT NULL,
+                created_at  TEXT DEFAULT (datetime('now'))
+            );
         """)
         db.commit()
         # Safe migrations
@@ -162,7 +189,7 @@ def verify_password(p, stored):
 def create_token(uid, email, name, role, can_edit_delete=0):
     return jwt.encode({"id":uid,"email":email,"name":name,"role":role,
         "can_edit_delete": can_edit_delete,
-        "exp":datetime.utcnow()+timedelta(days=7)}, JWT_SECRET, algorithm="HS256")
+        "exp":datetime.utcnow()+timedelta(days=30)}, JWT_SECRET, algorithm="HS256")
 
 def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     try: return jwt.decode(creds.credentials, JWT_SECRET, algorithms=["HS256"])
@@ -187,6 +214,18 @@ class SaleCreate(BaseModel): date:str; customer_name:str; customer_phone:Optiona
 class SalePaymentCreate(BaseModel): amount:float; date:str; notes:Optional[str]=None
 class SaleReturnCreate(BaseModel): date:str; notes:Optional[str]=None; return_collected:float=0; return_owe:float=0
 class QueryRequest(BaseModel): sql:str; password:str
+# Product builder models
+class IngredientItem(BaseModel): item_name:str; qty:float; unit:str="units"; unit_cost:float=0
+class ChargeItem(BaseModel): label:str; amount:float
+class ProductBuildCreate(BaseModel):
+    name:str; description:Optional[str]=None; unit:str="pcs"; qty_available:float=0; is_active:int=1
+    ingredients:Optional[list]=[]
+    charges:Optional[list]=[]
+# Multi-product order models
+class OrderLineItem(BaseModel): product_id:Optional[int]=None; product_name:str; qty:float; unit:str="pcs"; unit_price:float
+class OrderCreate(BaseModel):
+    date:str; customer_name:str; customer_phone:Optional[str]=None; customer_addr:Optional[str]=None
+    items:list; paid_amount:float=0; payment_notes:Optional[str]=None; notes:Optional[str]=None
 
 # ── Auth ──────────────────────────────────────────────────────
 @app.post("/api/auth/register", status_code=201)
@@ -386,7 +425,46 @@ async def upload_product_image(pid:int, file:UploadFile=File(...), admin=Depends
 @app.delete("/api/products/{pid}")
 def delete_product(pid:int, admin=Depends(require_admin)):
     with get_db() as db:
+        db.execute("DELETE FROM product_ingredients WHERE product_id=?", (pid,))
+        db.execute("DELETE FROM product_charges WHERE product_id=?", (pid,))
         db.execute("DELETE FROM products WHERE id=?", (pid,)); db.commit(); return {"success":True}
+
+# Product builder: ingredients + charges
+@app.post("/api/products/build", status_code=201)
+def build_product(data:ProductBuildCreate, user=Depends(get_current_user)):
+    """Create product from raw ingredients + extra charges. Auto-calculates defined_price."""
+    ingredients = data.ingredients or []
+    charges = data.charges or []
+    # Calculate total cost from ingredients
+    ingredients_cost = sum(float(i.get("qty",0)) * float(i.get("unit_cost",0)) for i in ingredients)
+    charges_total = sum(float(c.get("amount",0)) for c in charges)
+    defined_price = ingredients_cost + charges_total
+    with get_db() as db:
+        cur = db.execute("INSERT INTO products(name,description,defined_price,unit,qty_available,is_active) VALUES(?,?,?,?,?,?)",
+            (data.name, data.description, defined_price, data.unit, data.qty_available, data.is_active))
+        pid = cur.lastrowid
+        for ing in ingredients:
+            db.execute("INSERT INTO product_ingredients(product_id,item_name,qty,unit,unit_cost) VALUES(?,?,?,?,?)",
+                (pid, ing.get("item_name",""), float(ing.get("qty",0)), ing.get("unit","units"), float(ing.get("unit_cost",0))))
+        for chg in charges:
+            db.execute("INSERT INTO product_charges(product_id,label,amount) VALUES(?,?,?)",
+                (pid, chg.get("label",""), float(chg.get("amount",0))))
+        db.commit()
+        prod = dict(db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone())
+        prod["ingredients"] = [dict(r) for r in db.execute("SELECT * FROM product_ingredients WHERE product_id=?",(pid,)).fetchall()]
+        prod["charges"] = [dict(r) for r in db.execute("SELECT * FROM product_charges WHERE product_id=?",(pid,)).fetchall()]
+        return prod
+
+@app.get("/api/products/{pid}/build-info")
+def get_product_build_info(pid:int, user=Depends(get_current_user)):
+    with get_db() as db:
+        prod = db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+        if not prod: raise HTTPException(404,"Not found")
+        return {
+            "product": dict(prod),
+            "ingredients": [dict(r) for r in db.execute("SELECT * FROM product_ingredients WHERE product_id=?",(pid,)).fetchall()],
+            "charges": [dict(r) for r in db.execute("SELECT * FROM product_charges WHERE product_id=?",(pid,)).fetchall()]
+        }
 
 # ── Customers (shared) ────────────────────────────────────────
 @app.get("/api/customers")
@@ -500,7 +578,65 @@ def delete_sale(sid:int, user=Depends(get_current_user)):
         if not s: raise HTTPException(404,"Not found")
         if s["product_id"] and not s["is_return"]:
             db.execute("UPDATE products SET qty_available=qty_available+? WHERE id=?", (s["qty"],s["product_id"]))
+        # Also restore qty for order_items if any
+        items = db.execute("SELECT * FROM order_items WHERE sale_id=?", (sid,)).fetchall()
+        for item in items:
+            if item["product_id"] and not s["is_return"]:
+                db.execute("UPDATE products SET qty_available=qty_available+? WHERE id=?", (item["qty"],item["product_id"]))
+        db.execute("DELETE FROM order_items WHERE sale_id=?", (sid,))
         db.execute("DELETE FROM sales WHERE id=?", (sid,)); db.commit(); return {"success":True}
+
+# ── Multi-product Orders ──────────────────────────────────────
+@app.post("/api/orders", status_code=201)
+def create_order(data:OrderCreate, user=Depends(get_current_user)):
+    """Create an order with multiple product line items."""
+    items = data.items or []
+    if not items: raise HTTPException(400, "Order must have at least one item")
+    total = sum(float(i.get("qty",0)) * float(i.get("unit_price",0)) for i in items)
+    paid  = min(data.paid_amount, total)
+    due   = total - paid
+    status = "paid" if paid>=total else ("partial" if paid>0 else "unpaid")
+    # For display, join product names
+    product_name = ", ".join(i.get("product_name","") for i in items[:3])
+    if len(items) > 3: product_name += f" +{len(items)-3} more"
+    qty_display = sum(float(i.get("qty",0)) for i in items)
+    with get_db() as db:
+        # Stock check + deduct
+        for i in items:
+            pid = i.get("product_id")
+            qty = float(i.get("qty",0))
+            if pid:
+                prod = db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+                if prod and prod["qty_available"] < qty:
+                    raise HTTPException(400, f"Not enough stock for {i.get('product_name')}. Available: {prod['qty_available']}")
+                if prod:
+                    db.execute("UPDATE products SET qty_available=qty_available-? WHERE id=?", (qty, pid))
+        if data.customer_phone:
+            if not db.execute("SELECT id FROM customers WHERE phone=?", (data.customer_phone,)).fetchone():
+                db.execute("INSERT INTO customers(name,phone,address) VALUES(?,?,?)",
+                    (data.customer_name, data.customer_phone, data.customer_addr))
+        cur = db.execute("""INSERT INTO sales(added_by,date,customer_name,customer_phone,customer_addr,
+            product_id,product_name,qty,unit,defined_price,unit_price,total,paid_amount,due_amount,payment_status,notes)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (user["id"],data.date,data.customer_name,data.customer_phone,data.customer_addr,
+             None,product_name,qty_display,"pcs",0,total/qty_display if qty_display>0 else 0,
+             total,paid,due,status,data.notes))
+        sale_id = cur.lastrowid
+        for i in items:
+            db.execute("INSERT INTO order_items(sale_id,product_id,product_name,qty,unit,unit_price,total) VALUES(?,?,?,?,?,?,?)",
+                (sale_id, i.get("product_id"), i.get("product_name",""), float(i.get("qty",0)),
+                 i.get("unit","pcs"), float(i.get("unit_price",0)),
+                 float(i.get("qty",0))*float(i.get("unit_price",0))))
+        if paid>0:
+            db.execute("INSERT INTO sale_payments(sale_id,added_by,amount,date,notes) VALUES(?,?,?,?,?)",
+                (sale_id,user["id"],paid,data.date, data.payment_notes or "Initial payment"))
+        db.commit()
+        return dict(db.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone())
+
+@app.get("/api/orders/{sid}/items")
+def get_order_items(sid:int, user=Depends(get_current_user)):
+    with get_db() as db:
+        return [dict(r) for r in db.execute("SELECT * FROM order_items WHERE sale_id=? ORDER BY id",(sid,)).fetchall()]
 
 # ── Analytics (Admin only) ────────────────────────────────────
 @app.get("/api/analytics/summary")
