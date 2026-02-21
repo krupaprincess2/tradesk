@@ -8,28 +8,16 @@ import { useAuth } from "./AuthContext";
 const BASE = "/api";
 const h = (ct=true) => ({ ...(ct?{"Content-Type":"application/json"}:{}), Authorization:`Bearer ${localStorage.getItem("tradesk_token")}` });
 
-// Auto-logout on 401 (expired/invalid token)
 const handleRes = async (r) => {
-  if(r.status===401){
-    localStorage.removeItem("tradesk_token");
-    localStorage.removeItem("tradesk_user");
-    window.location.reload();
-    throw new Error("Session expired. Please login again.");
-  }
   const d = await r.json();
   if(!r.ok) throw new Error(d.detail||"Failed");
   return d;
 };
 
-const get  = async url => {
+const get = async url => {
   const r = await fetch(`${BASE}${url}`,{headers:h()});
-  if(r.status===401){
-    localStorage.removeItem("tradesk_token");
-    localStorage.removeItem("tradesk_user");
-    window.location.reload();
-    return [];
-  }
-  return r.json();
+  const d = await r.json();
+  return Array.isArray(d) ? d : (d && typeof d === "object" ? d : []);
 };
 const post = (url,body) => fetch(`${BASE}${url}`,{method:"POST",headers:h(),body:JSON.stringify(body)}).then(handleRes);
 const put  = (url,body) => fetch(`${BASE}${url}`,{method:"PUT",headers:h(),body:JSON.stringify(body)}).then(handleRes);

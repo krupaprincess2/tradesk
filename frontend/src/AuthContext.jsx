@@ -124,7 +124,8 @@ export function AuthProvider({ children }) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Login failed");
-    localStorage.setItem("tradesk_token", data.access_token);
+    const loginToken = data.access_token || data.token;
+    localStorage.setItem("tradesk_token", loginToken);
     localStorage.setItem("tradesk_user", JSON.stringify(data.user));
     setUser(data.user);
     return data;
@@ -138,7 +139,8 @@ export function AuthProvider({ children }) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Registration failed");
-    localStorage.setItem("tradesk_token", data.access_token);
+    const regToken = data.access_token || data.token;
+    localStorage.setItem("tradesk_token", regToken);
     localStorage.setItem("tradesk_user", JSON.stringify(data.user));
     setUser(data.user);
     return data;
