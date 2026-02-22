@@ -129,7 +129,7 @@ def init_db():
             );
             CREATE TABLE IF NOT EXISTS sale_payments (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                sale_id    INTEGER NOT NULL REFERENCES sales(id),
+                sale_id    INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
                 added_by   INTEGER REFERENCES users(id),
                 amount     REAL NOT NULL,
                 date       TEXT NOT NULL,
@@ -391,7 +391,20 @@ def get_purchase_payments(pid:int, user=Depends(get_current_user)):
 @app.delete("/api/purchases/{pid}")
 def delete_purchase(pid:int, user=Depends(get_current_user)):
     with get_db() as db:
-        db.execute("DELETE FROM purchases WHERE id=?", (pid,)); db.commit(); return {"success":True}
+        p = db.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
+        if not p: raise HTTPException(404, "Purchase not found")
+        # Block if this raw material is used in any product definition
+        used = db.execute(
+            "SELECT COUNT(*) as cnt FROM product_ingredients WHERE item_name=?",
+            (p["item"],)
+        ).fetchone()
+        if used and used["cnt"] > 0:
+            raise HTTPException(400,
+                f"Cannot delete: '{p['item']}' is used in {used['cnt']} product definition(s). "
+                f"Delete those products first.")
+        db.execute("DELETE FROM purchases WHERE id=?", (pid,))
+        db.commit()
+        return {"success": True}
 
 # ── Products (shared, with qty) ───────────────────────────────
 @app.get("/api/products")
@@ -430,9 +443,25 @@ async def upload_product_image(pid:int, file:UploadFile=File(...), admin=Depends
 @app.delete("/api/products/{pid}")
 def delete_product(pid:int, admin=Depends(require_admin)):
     with get_db() as db:
+        prod = db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+        if not prod: raise HTTPException(404, "Product not found")
+        # Block if product has been ordered (in sales or order_items)
+        in_sales = db.execute(
+            "SELECT COUNT(*) as cnt FROM sales WHERE product_id=? AND is_return=0", (pid,)
+        ).fetchone()
+        in_orders = db.execute(
+            "SELECT COUNT(*) as cnt FROM order_items WHERE product_id=?", (pid,)
+        ).fetchone()
+        total_orders = (in_sales["cnt"] if in_sales else 0) + (in_orders["cnt"] if in_orders else 0)
+        if total_orders > 0:
+            raise HTTPException(400,
+                f"Cannot delete '{prod['name']}': it has been used in {total_orders} order(s). "
+                f"You can mark it as Inactive instead.")
         db.execute("DELETE FROM product_ingredients WHERE product_id=?", (pid,))
         db.execute("DELETE FROM product_charges WHERE product_id=?", (pid,))
-        db.execute("DELETE FROM products WHERE id=?", (pid,)); db.commit(); return {"success":True}
+        db.execute("DELETE FROM products WHERE id=?", (pid,))
+        db.commit()
+        return {"success": True}
 
 # Product builder: ingredients + charges
 @app.post("/api/products/build", status_code=201)
@@ -607,16 +636,23 @@ def return_payback(sid:int, data:SalePaymentCreate, user=Depends(get_current_use
 def delete_sale(sid:int, user=Depends(get_current_user)):
     with get_db() as db:
         s = db.execute("SELECT * FROM sales WHERE id=?", (sid,)).fetchone()
-        if not s: raise HTTPException(404,"Not found")
+        if not s: raise HTTPException(404, "Order not found")
+        # Restore product stock for single-product sale
         if s["product_id"] and not s["is_return"]:
-            db.execute("UPDATE products SET qty_available=qty_available+? WHERE id=?", (s["qty"],s["product_id"]))
-        # Also restore qty for order_items if any
+            db.execute("UPDATE products SET qty_available=qty_available+? WHERE id=?",
+                       (s["qty"], s["product_id"]))
+        # Restore product stock for each order_item (multi-product order)
         items = db.execute("SELECT * FROM order_items WHERE sale_id=?", (sid,)).fetchall()
         for item in items:
             if item["product_id"] and not s["is_return"]:
-                db.execute("UPDATE products SET qty_available=qty_available+? WHERE id=?", (item["qty"],item["product_id"]))
+                db.execute("UPDATE products SET qty_available=qty_available+? WHERE id=?",
+                           (item["qty"], item["product_id"]))
+        # Explicitly delete child rows first (sale_payments has no ON DELETE CASCADE)
+        db.execute("DELETE FROM sale_payments WHERE sale_id=?", (sid,))
         db.execute("DELETE FROM order_items WHERE sale_id=?", (sid,))
-        db.execute("DELETE FROM sales WHERE id=?", (sid,)); db.commit(); return {"success":True}
+        db.execute("DELETE FROM sales WHERE id=?", (sid,))
+        db.commit()
+        return {"success": True}
 
 # ── Multi-product Orders ──────────────────────────────────────
 @app.post("/api/orders", status_code=201)

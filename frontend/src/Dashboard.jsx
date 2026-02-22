@@ -33,6 +33,18 @@ const uploadImage = async (url, file) => {
   return handleRes(r);
 };
 
+// Safe delete: shows backend error message if blocked, then reloads
+const safeDelete = async (url, onReload, setErrFn) => {
+  try {
+    await del(url);
+    await onReload();
+  } catch(e) {
+    const msg = e.message || "Delete failed";
+    if(setErrFn) setErrFn(msg);
+    else alert(msg);
+  }
+};
+
 const C = {
   bg:"#0a0a0f",card:"#13131a",card2:"#1a1a24",border:"#252535",
   accent:"#f0c040",green:"#2ecc71",red:"#e74c3c",orange:"#f39c12",
@@ -637,7 +649,7 @@ export default function Dashboard(){
                               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                                 <button onClick={()=>openHistory(p,"purchase")} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"3px 8px",color:C.blue,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><History size={9}/>History</button>
                                 {p.due_amount>0&&<button onClick={()=>{setShowPurchasePay(p);setPayForm({amount:p.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
-                                {canEditDelete&&<button onClick={()=>del(`/purchases/${p.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
+                                {canEditDelete&&<button onClick={()=>safeDelete(`/purchases/${p.id}`,loadAll,setError)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
                               </div>
                             </td>
                           </tr>
@@ -716,7 +728,7 @@ export default function Dashboard(){
                               {canEditDelete&&(
                                 <div style={{display:"flex",gap:4}}>
                                   <button onClick={()=>openEditProduct(prod)} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"4px 10px",color:C.blue,cursor:"pointer",fontSize:11,fontWeight:600}}>✏️ Edit</button>
-                                  <button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:5,padding:"4px 8px",color:C.red,cursor:"pointer",fontSize:11}}>Del</button>
+                                  <button onClick={()=>safeDelete(`/products/${prod.id}`,loadAll,setError)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:5,padding:"4px 8px",color:C.red,cursor:"pointer",fontSize:11}}>Del</button>
                                 </div>
                               )}
                             </td>
@@ -818,7 +830,7 @@ export default function Dashboard(){
                                   <button onClick={()=>setShowInvoice({...s,idx:i})} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:5,padding:"3px 8px",color:C.textDim,cursor:"pointer",fontSize:10}}><FileText size={9}/></button>
                                   {s.due_amount>0&&!s.is_return&&<button onClick={()=>{setShowSalePay(s);setPayForm({amount:s.due_amount,date:today(),notes:""});}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:5,padding:"3px 8px",color:C.green,cursor:"pointer",fontSize:10}}>+Pay</button>}
                                   {!s.is_return&&<button onClick={()=>setShowReturn(s)} style={{background:C.orange+"22",border:`1px solid ${C.orange}44`,borderRadius:5,padding:"3px 8px",color:C.orange,cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",gap:2}}><RotateCcw size={9}/>Return</button>}
-                                  {canEditDelete&&<button onClick={()=>del(`/sales/${s.id}`).then(loadAll)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
+                                  {canEditDelete&&<button onClick={()=>safeDelete(`/sales/${s.id}`,loadAll,setError)} style={{background:"none",border:`1px solid ${C.red}44`,borderRadius:5,padding:"3px 8px",color:C.red,cursor:"pointer",fontSize:10}}>Del</button>}
                                 </div>
                               </td>
                             </tr>
@@ -1084,7 +1096,7 @@ export default function Dashboard(){
                       {s.phone&&<div style={{color:C.textDim,fontSize:13,display:"flex",alignItems:"center",gap:5,marginBottom:4}}><Phone size={11}/>{s.phone}</div>}
                       {s.address&&<div style={{color:C.textDim,fontSize:13,display:"flex",alignItems:"center",gap:5,marginBottom:4}}><MapPin size={11}/>{s.address}</div>}
                       {s.notes&&<div style={{color:C.muted,fontSize:12,marginTop:6,fontStyle:"italic"}}>{s.notes}</div>}
-                      <button onClick={()=>del(`/suppliers/${s.id}`).then(loadAll)} style={{marginTop:10,background:"none",border:`1px solid ${C.red}44`,borderRadius:6,padding:"4px 10px",color:C.red,cursor:"pointer",fontSize:11}}>Remove</button>
+                      <button onClick={()=>safeDelete(`/suppliers/${s.id}`,loadAll,setError)} style={{marginTop:10,background:"none",border:`1px solid ${C.red}44`,borderRadius:6,padding:"4px 10px",color:C.red,cursor:"pointer",fontSize:11}}>Remove</button>
                     </div>
                   ))}
                 </div>
