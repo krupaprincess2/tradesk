@@ -335,25 +335,34 @@ def list_purchases(user=Depends(get_current_user)):
 
 @app.post("/api/purchases", status_code=201)
 def create_purchase(data:PurchaseCreate, user=Depends(get_current_user)):
-    total = data.qty * data.unit_cost
-    paid  = min(data.paid_amount, total)
-    due   = total - paid
-    status = "paid" if paid>=total else ("partial" if paid>0 else "unpaid")
-    with get_db() as db:
-        if not db.execute("SELECT id FROM raw_items WHERE name=?", (data.item,)).fetchone():
-            db.execute("INSERT INTO raw_items(name,unit,low_stock_threshold) VALUES(?,?,?)",
-                (data.item, data.unit, data.low_stock_alert))
-        else:
-            db.execute("UPDATE raw_items SET low_stock_threshold=? WHERE name=?", (data.low_stock_alert, data.item))
-        cur = db.execute("""INSERT INTO purchases(added_by,date,supplier_name,item,qty,unit,unit_cost,total,
-            paid_amount,due_amount,payment_status,low_stock_alert,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (user["id"],data.date,data.supplier_name,data.item,data.qty,data.unit,data.unit_cost,
-             total,paid,due,status,data.low_stock_alert,data.notes))
-        if paid>0:
-            db.execute("INSERT INTO purchase_payments(purchase_id,added_by,amount,date,notes) VALUES(?,?,?,?,?)",
-                (cur.lastrowid,user["id"],paid,data.date,"Initial payment"))
-        db.commit()
-        return dict(db.execute("SELECT * FROM purchases WHERE id=?", (cur.lastrowid,)).fetchone())
+    try:
+        total = data.qty * data.unit_cost
+        paid  = min(data.paid_amount, total)
+        due   = total - paid
+        status = "paid" if paid>=total else ("partial" if paid>0 else "unpaid")
+        with get_db() as db:
+            if not db.execute("SELECT id FROM raw_items WHERE name=?", (data.item,)).fetchone():
+                db.execute("INSERT INTO raw_items(name,unit,low_stock_threshold) VALUES(?,?,?)",
+                    (data.item, data.unit or "units", data.low_stock_alert or 0))
+            else:
+                db.execute("UPDATE raw_items SET low_stock_threshold=? WHERE name=?",
+                    (data.low_stock_alert or 0, data.item))
+            cur = db.execute(
+                "INSERT INTO purchases(added_by,date,supplier_name,item,qty,unit,unit_cost,total,"
+                "paid_amount,due_amount,payment_status,low_stock_alert,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (user["id"],data.date,data.supplier_name,data.item,data.qty,
+                 data.unit or "units",data.unit_cost,
+                 total,paid,due,status,data.low_stock_alert or 0,data.notes))
+            if paid>0:
+                db.execute(
+                    "INSERT INTO purchase_payments(purchase_id,added_by,amount,date,notes) VALUES(?,?,?,?,?)",
+                    (cur.lastrowid,user["id"],paid,data.date,"Initial payment"))
+            db.commit()
+            return dict(db.execute("SELECT * FROM purchases WHERE id=?", (cur.lastrowid,)).fetchone())
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to save purchase: {str(e)}")
 
 @app.post("/api/purchases/{pid}/image")
 async def upload_purchase_image(pid:int, file:UploadFile=File(...), user=Depends(get_current_user)):
@@ -433,11 +442,17 @@ def list_products(user=Depends(get_current_user)):
 
 @app.post("/api/products", status_code=201)
 def create_product(data:ProductCreate, user=Depends(get_current_user)):
-    with get_db() as db:
-        cur = db.execute("INSERT INTO products(name,description,defined_price,unit,qty_available,is_active) VALUES(?,?,?,?,?,?)",
-            (data.name,data.description,data.defined_price,data.unit,data.qty_available,data.is_active))
-        db.commit()
-        return dict(db.execute("SELECT * FROM products WHERE id=?", (cur.lastrowid,)).fetchone())
+    try:
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO products(name,description,defined_price,unit,qty_available,is_active) VALUES(?,?,?,?,?,?)",
+                (data.name,data.description,data.defined_price,data.unit or "pcs",data.qty_available or 0,data.is_active))
+            db.commit()
+            return dict(db.execute("SELECT * FROM products WHERE id=?", (cur.lastrowid,)).fetchone())
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to save product: {str(e)}")
 
 @app.put("/api/products/{pid}")
 def update_product(pid:int, data:ProductCreate, user=Depends(get_current_user)):
@@ -491,9 +506,10 @@ def delete_product(pid:int, admin=Depends(require_admin)):
 @app.post("/api/products/build", status_code=201)
 def build_product(data:ProductBuildCreate, user=Depends(get_current_user)):
     """Create product from raw ingredients + extra charges. Auto-calculates defined_price."""
-    ingredients = data.ingredients or []
-    charges = data.charges or []
-    # Validate stock availability for each ingredient
+    try:
+      ingredients = data.ingredients or []
+      charges = data.charges or []
+      # Validate stock availability for each ingredient
     # qty in each ingredient row is PER PRODUCT — total consumed = qty × qty_making
     # available = total purchased - already committed to other product definitions
     qty_making = max(1, float(data.qty_available) if data.qty_available else 1)
@@ -541,6 +557,10 @@ def build_product(data:ProductBuildCreate, user=Depends(get_current_user)):
         prod["ingredients"] = [dict(r) for r in db.execute("SELECT * FROM product_ingredients WHERE product_id=?",(pid,)).fetchall()]
         prod["charges"] = [dict(r) for r in db.execute("SELECT * FROM product_charges WHERE product_id=?",(pid,)).fetchall()]
         return prod
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to build product: {str(e)}")
 
 @app.get("/api/products/{pid}/build-info")
 def get_product_build_info(pid:int, user=Depends(get_current_user)):
@@ -584,32 +604,40 @@ def list_sales(user=Depends(get_current_user)):
 
 @app.post("/api/sales", status_code=201)
 def create_sale(data:SaleCreate, user=Depends(get_current_user)):
-    total = data.qty * data.unit_price
-    paid  = min(data.paid_amount, total)
-    due   = total - paid
-    status = "paid" if paid>=total else ("partial" if paid>0 else "unpaid")
-    with get_db() as db:
-        if data.product_id:
-            prod = db.execute("SELECT * FROM products WHERE id=?", (data.product_id,)).fetchone()
-            if prod and prod["qty_available"] < data.qty:
-                raise HTTPException(400, f"Not enough stock. Available: {prod['qty_available']} {prod['unit']}")
-            if prod:
-                db.execute("UPDATE products SET qty_available=qty_available-? WHERE id=?", (data.qty,data.product_id))
-        if data.customer_phone:
-            if not db.execute("SELECT id FROM customers WHERE phone=?", (data.customer_phone,)).fetchone():
-                db.execute("INSERT INTO customers(name,phone,address) VALUES(?,?,?)",
-                    (data.customer_name,data.customer_phone,data.customer_addr))
-        cur = db.execute("""INSERT INTO sales(added_by,date,customer_name,customer_phone,customer_addr,
-            product_id,product_name,qty,unit,defined_price,unit_price,total,paid_amount,due_amount,payment_status,notes)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (user["id"],data.date,data.customer_name,data.customer_phone,data.customer_addr,
-             data.product_id,data.product_name,data.qty,data.unit,data.defined_price,
-             data.unit_price,total,paid,due,status,data.notes))
-        if paid>0:
-            db.execute("INSERT INTO sale_payments(sale_id,added_by,amount,date,notes) VALUES(?,?,?,?,?)",
-                (cur.lastrowid,user["id"],paid,data.date, data.payment_notes or "Initial payment"))
-        db.commit()
-        return dict(db.execute("SELECT * FROM sales WHERE id=?", (cur.lastrowid,)).fetchone())
+    try:
+        total = data.qty * data.unit_price
+        paid  = min(data.paid_amount, total)
+        due   = total - paid
+        status = "paid" if paid>=total else ("partial" if paid>0 else "unpaid")
+        with get_db() as db:
+            if data.product_id:
+                prod = db.execute("SELECT * FROM products WHERE id=?", (data.product_id,)).fetchone()
+                if prod and prod["qty_available"] < data.qty:
+                    raise HTTPException(400, f"Not enough stock. Available: {prod['qty_available']}")
+                if prod:
+                    db.execute("UPDATE products SET qty_available=qty_available-? WHERE id=?",
+                               (data.qty, data.product_id))
+            if data.customer_phone:
+                if not db.execute("SELECT id FROM customers WHERE phone=?", (data.customer_phone,)).fetchone():
+                    db.execute("INSERT INTO customers(name,phone,address) VALUES(?,?,?)",
+                        (data.customer_name,data.customer_phone,data.customer_addr))
+            cur = db.execute(
+                "INSERT INTO sales(added_by,date,customer_name,customer_phone,customer_addr,"
+                "product_id,product_name,qty,unit,defined_price,unit_price,total,paid_amount,due_amount,payment_status,notes)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (user["id"],data.date,data.customer_name,data.customer_phone,data.customer_addr,
+                 data.product_id,data.product_name,data.qty,data.unit or "pcs",data.defined_price,
+                 data.unit_price,total,paid,due,status,data.notes))
+            if paid>0:
+                db.execute(
+                    "INSERT INTO sale_payments(sale_id,added_by,amount,date,notes) VALUES(?,?,?,?,?)",
+                    (cur.lastrowid,user["id"],paid,data.date, data.payment_notes or "Initial payment"))
+            db.commit()
+            return dict(db.execute("SELECT * FROM sales WHERE id=?", (cur.lastrowid,)).fetchone())
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to save order: {str(e)}")
 
 @app.post("/api/sales/{sid}/payments", status_code=201)
 def add_sale_payment(sid:int, data:SalePaymentCreate, user=Depends(get_current_user)):
@@ -694,8 +722,9 @@ def delete_sale(sid:int, user=Depends(get_current_user)):
 @app.post("/api/orders", status_code=201)
 def create_order(data:OrderCreate, user=Depends(get_current_user)):
     """Create an order with multiple product line items."""
-    items = data.items or []
-    if not items: raise HTTPException(400, "Order must have at least one item")
+    try:
+      items = data.items or []
+      if not items: raise HTTPException(400, "Order must have at least one item")
     total = sum(float(i.get("qty",0)) * float(i.get("unit_price",0)) for i in items)
     paid  = min(data.paid_amount, total)
     due   = total - paid
@@ -736,6 +765,10 @@ def create_order(data:OrderCreate, user=Depends(get_current_user)):
                 (sale_id,user["id"],paid,data.date, data.payment_notes or "Initial payment"))
         db.commit()
         return dict(db.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone())
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to create order: {str(e)}")
 
 @app.get("/api/orders/{sid}/items")
 def get_order_items(sid:int, user=Depends(get_current_user)):

@@ -1141,13 +1141,13 @@ export default function Dashboard(){
 
         {/* ── ADD PURCHASE MODAL ── */}
         {showPModal&&(
-          <Modal title="Add Raw Material Purchase" onClose={()=>setShowPModal(false)} wide>
+          <Modal title="Add Raw Material Purchase" onClose={()=>{setShowPModal(false);setError("");}} wide>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <Field label="Date"><DatePicker value={pForm.date} onChange={v=>setPForm(f=>({...f,date:v}))}/></Field>
               <Field label="Supplier Name"><Input type="text" placeholder="Supplier name" value={pForm.supplier_name} onChange={e=>setPForm(f=>({...f,supplier_name:e.target.value}))}/></Field>
             </div>
             <Field label="Item / Raw Material Name"><Input type="text" placeholder="e.g. Pearls, Gold Thread, Silver Wire" value={pForm.item} onChange={e=>setPForm(f=>({...f,item:e.target.value}))}/></Field>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <Field label="Quantity"><Input type="number" placeholder="0" value={pForm.qty} onChange={e=>setPForm(f=>({...f,qty:e.target.value}))}/></Field>
               <Field label="Unit Cost (₹)"><Input type="number" placeholder="0" value={pForm.unit_cost} onChange={e=>setPForm(f=>({...f,unit_cost:e.target.value}))}/></Field>
             </div>
@@ -1177,7 +1177,7 @@ export default function Dashboard(){
 
         {/* ── ADD PRODUCT MODAL (with builder) ── */}
         {showProdModal&&(
-          <Modal title="Add Product" onClose={()=>{setShowProdModal(false);setProdIngredients([]);setProdCharges([]);setProdBuildMode(false);}} wide>
+          <Modal title="Add Product" onClose={()=>{setShowProdModal(false);setError("");setProdIngredients([]);setProdCharges([]);setProdBuildMode(false);}} wide>
             {/* Toggle: simple vs builder */}
             <div style={{display:"flex",gap:8,marginBottom:16,background:C.card2,borderRadius:10,padding:5}}>
               <button onClick={()=>setProdBuildMode(false)} style={{flex:1,background:!prodBuildMode?C.purple:"transparent",border:"none",borderRadius:7,padding:"7px 0",color:!prodBuildMode?C.text:C.textDim,cursor:"pointer",fontSize:12,fontWeight:600,transition:"all 0.2s"}}>
@@ -1335,7 +1335,7 @@ export default function Dashboard(){
 
         {/* ── NEW ORDER MODAL (multi-product) ── */}
         {showSModal&&(
-          <Modal title="New Order" onClose={()=>{setShowSModal(false);setPriceWarning("");}} wide>
+          <Modal title="New Order" onClose={()=>{setShowSModal(false);setError("");setPriceWarning("");}} wide>
 
             {/* Date + Customer */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:4}}>
