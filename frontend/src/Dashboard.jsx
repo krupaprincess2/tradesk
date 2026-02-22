@@ -8,7 +8,11 @@ import { useAuth } from "./AuthContext";
 const BASE = "/api";
 const h = (ct=true) => ({ ...(ct?{"Content-Type":"application/json"}:{}), Authorization:`Bearer ${localStorage.getItem("tradesk_token")}` });
 
+// Dispatch logout event on 401 — AuthProvider listens and clears user state
+const forceLogout = () => window.dispatchEvent(new Event("auth:logout"));
+
 const handleRes = async (r) => {
+  if(r.status === 401){ forceLogout(); throw new Error("Session expired"); }
   const d = await r.json();
   if(!r.ok) throw new Error(d.detail||"Failed");
   return d;
@@ -16,6 +20,7 @@ const handleRes = async (r) => {
 
 const get = async url => {
   const r = await fetch(`${BASE}${url}`,{headers:h()});
+  if(r.status === 401){ forceLogout(); return []; }
   const d = await r.json();
   return Array.isArray(d) ? d : (d && typeof d === "object" ? d : []);
 };
@@ -262,6 +267,15 @@ export default function Dashboard(){
       if(prodBuildMode){
         // Builder mode: ingredients + charges, auto-calc price
         if(prodIngredients.length===0&&prodCharges.length===0){setError("Add at least one ingredient or charge");setSaving(false);return;}
+        // Validate each ingredient qty against available stock
+        for(const ing of prodIngredients.filter(i=>i.item_name&&i.qty)){
+          const invItem = inventory.find(i=>i.name===ing.item_name);
+          const available = invItem?.purchased || 0;
+          if(+ing.qty > available){
+            setError(`Not enough stock for "${ing.item_name}" — you need ${ing.qty} but only ${available} ${invItem?.unit||"units"} available`);
+            setSaving(false);return;
+          }
+        }
         res = await post("/products/build",{
           ...prodForm,
           defined_price:0,  // backend calculates
@@ -1162,7 +1176,22 @@ export default function Dashboard(){
                         }} placeholder="— Select item —" options={inventory.map(i=>({value:i.name,label:`${i.name} (${i.purchased} ${i.unit})`}))}/>
                       </Field>
                       <Field label={idx===0?"Qty":""}>
-                        <Input type="number" placeholder="0" value={ing.qty} onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/>
+                        {(()=>{
+                          const invItem = inventory.find(i=>i.name===ing.item_name);
+                          const maxQty = invItem?.purchased || 0;
+                          const exceeded = ing.item_name && +ing.qty > maxQty;
+                          return <>
+                            <Input type="number" placeholder="0" value={ing.qty}
+                              max={maxQty||undefined}
+                              style={{borderColor: exceeded ? C.red : undefined}}
+                              onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/>
+                            {ing.item_name && maxQty>0 && (
+                              <div style={{fontSize:10,marginTop:3,color:exceeded?C.red:C.textDim,fontWeight:exceeded?700:400}}>
+                                {exceeded ? `⚠️ Max: ${maxQty}` : `Available: ${maxQty} ${invItem?.unit||""}`}
+                              </div>
+                            )}
+                          </>;
+                        })()}
                       </Field>
                       <Field label={idx===0?"Unit":""}>
                         <Input type="text" placeholder="pcs" value={ing.unit} onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,unit:e.target.value}:x))}/>

@@ -114,6 +114,15 @@ export function AuthProvider({ children }) {
       try { setUser(JSON.parse(userData)); } catch {}
     }
     setLoading(false);
+
+    // Listen for forced logout event (fired when API returns 401)
+    const handleForceLogout = () => {
+      localStorage.removeItem("tradesk_token");
+      localStorage.removeItem("tradesk_user");
+      setUser(null);
+    };
+    window.addEventListener("auth:logout", handleForceLogout);
+    return () => window.removeEventListener("auth:logout", handleForceLogout);
   }, []);
 
   const login = async (email, password) => {

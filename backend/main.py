@@ -11,6 +11,11 @@ app = FastAPI(title="TradDesk API", version="3.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 JWT_SECRET     = os.getenv("JWT_SECRET", "tradesk_secret_2026")
+# DEPLOY_VERSION: change this value to force all users to re-login immediately
+# Update this in Railway env vars OR just change the default value below
+DEPLOY_VERSION = os.getenv("DEPLOY_VERSION", "v4")
+# Combine secret + version so changing DEPLOY_VERSION invalidates all existing tokens
+_EFFECTIVE_SECRET = f"{JWT_SECRET}_{DEPLOY_VERSION}"
 DB_PATH        = os.getenv("DB_PATH", "tradesk.db")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "tradesk_admin_2026")
 bearer_scheme  = HTTPBearer()
@@ -189,10 +194,10 @@ def verify_password(p, stored):
 def create_token(uid, email, name, role, can_edit_delete=0):
     return jwt.encode({"id":uid,"email":email,"name":name,"role":role,
         "can_edit_delete": can_edit_delete,
-        "exp":datetime.utcnow()+timedelta(days=30)}, JWT_SECRET, algorithm="HS256")
+        "exp":datetime.utcnow()+timedelta(days=30)}, _EFFECTIVE_SECRET, algorithm="HS256")
 
 def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
-    try: return jwt.decode(creds.credentials, JWT_SECRET, algorithms=["HS256"])
+    try: return jwt.decode(creds.credentials, _EFFECTIVE_SECRET, algorithms=["HS256"])
     except jwt.ExpiredSignatureError: raise HTTPException(401, "Token expired")
     except: raise HTTPException(401, "Invalid token")
 
@@ -435,6 +440,19 @@ def build_product(data:ProductBuildCreate, user=Depends(get_current_user)):
     """Create product from raw ingredients + extra charges. Auto-calculates defined_price."""
     ingredients = data.ingredients or []
     charges = data.charges or []
+    # Validate stock availability for each ingredient
+    with get_db() as db:
+        for ing in ingredients:
+            item_name = ing.get("item_name","")
+            needed_qty = float(ing.get("qty",0))
+            if item_name and needed_qty > 0:
+                row = db.execute(
+                    "SELECT COALESCE(SUM(qty),0) as total FROM purchases WHERE item=?",
+                    (item_name,)
+                ).fetchone()
+                available = float(row["total"]) if row else 0
+                if needed_qty > available:
+                    raise HTTPException(400, f"Not enough stock for '{item_name}' — need {needed_qty} but only {available} available")
     # Calculate total cost from ingredients
     ingredients_cost = sum(float(i.get("qty",0)) * float(i.get("unit_cost",0)) for i in ingredients)
     charges_total = sum(float(c.get("amount",0)) for c in charges)
