@@ -134,12 +134,20 @@ export function AuthProvider({ children }) {
     const ct = r.headers.get("content-type") || "";
     if (!ct.includes("application/json")) throw new Error(`Server error (${r.status})`);
     const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || "Login failed");
+    if (!r.ok) throw new Error(parseError(data, "Login failed"));
     const loginToken = data.access_token || data.token;
     localStorage.setItem("tradesk_token", loginToken);
     localStorage.setItem("tradesk_user", JSON.stringify(data.user));
     setUser(data.user);
     return data;
+  };
+
+  const parseError = (data, fallback) => {
+    if (!data) return fallback;
+    if (typeof data.detail === "string") return data.detail;
+    if (Array.isArray(data.detail)) return data.detail.map(e => e.msg || String(e)).join(", ");
+    if (typeof data.message === "string") return data.message;
+    return fallback;
   };
 
   const register = async (name, email, password) => {
@@ -153,7 +161,7 @@ export function AuthProvider({ children }) {
       throw new Error(`Server error (${r.status}) — please try again`);
     }
     const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || "Registration failed");
+    if (!r.ok) throw new Error(parseError(data, "Registration failed"));
     const regToken = data.access_token || data.token;
     localStorage.setItem("tradesk_token", regToken);
     localStorage.setItem("tradesk_user", JSON.stringify(data.user));
