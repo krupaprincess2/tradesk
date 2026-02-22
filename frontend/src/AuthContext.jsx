@@ -131,6 +131,8 @@ export function AuthProvider({ children }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) throw new Error(`Server error (${r.status})`);
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Login failed");
     const loginToken = data.access_token || data.token;
@@ -146,6 +148,10 @@ export function AuthProvider({ children }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, password }),
     });
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      throw new Error(`Server error (${r.status}) — please try again`);
+    }
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Registration failed");
     const regToken = data.access_token || data.token;

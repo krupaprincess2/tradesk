@@ -235,21 +235,27 @@ class OrderCreate(BaseModel):
 # ── Auth ──────────────────────────────────────────────────────
 @app.post("/api/auth/register", status_code=201)
 def register(data: RegisterReq):
-    if len(data.password) < 6: raise HTTPException(400, "Password min 6 chars")
-    with get_db() as db:
-        count = db.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
-        role  = "admin" if count == 0 else "staff"
-        if db.execute("SELECT id FROM users WHERE email=?", (data.email,)).fetchone():
-            raise HTTPException(409, "Email already registered")
-        cur = db.execute("INSERT INTO users(name,email,password,role) VALUES(?,?,?,?)",
-            (data.name, data.email, hash_password(data.password), role))
-        db.commit()
-        return {"token": create_token(cur.lastrowid, data.email, data.name, role, 0),
-                "user": {"id":cur.lastrowid,"name":data.name,"email":data.email,"role":role,"can_edit_delete":0}}
+    try:
+        if len(data.password) < 6: raise HTTPException(400, "Password must be at least 6 characters")
+        with get_db() as db:
+            count = db.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
+            role  = "admin" if count == 0 else "staff"
+            if db.execute("SELECT id FROM users WHERE email=?", (data.email,)).fetchone():
+                raise HTTPException(409, "Email already registered")
+            cur = db.execute("INSERT INTO users(name,email,password,role) VALUES(?,?,?,?)",
+                (data.name, data.email, hash_password(data.password), role))
+            db.commit()
+            return {"token": create_token(cur.lastrowid, data.email, data.name, role, 0),
+                    "user": {"id":cur.lastrowid,"name":data.name,"email":data.email,"role":role,"can_edit_delete":0}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Registration failed: {str(e)}")
 
 @app.post("/api/auth/login")
 def login(data: LoginReq):
-    with get_db() as db:
+    try:
+      with get_db() as db:
         u = db.execute("SELECT * FROM users WHERE email=?", (data.email,)).fetchone()
         if not u or not verify_password(data.password, u["password"]):
             raise HTTPException(401, "Invalid email or password")
@@ -257,6 +263,10 @@ def login(data: LoginReq):
         ced = u["can_edit_delete"] if "can_edit_delete" in u.keys() else 0
         return {"token": create_token(u["id"],u["email"],u["name"],u["role"],ced),
                 "user": {"id":u["id"],"name":u["name"],"email":u["email"],"role":u["role"],"can_edit_delete":ced}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Login failed: {str(e)}")
 
 @app.get("/api/auth/me")
 def get_me(user=Depends(get_current_user)):
