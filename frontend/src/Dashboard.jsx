@@ -180,6 +180,10 @@ export default function Dashboard(){
   const [error,setError]               = useState("");
   const [priceWarning,setPriceWarning] = useState("");
   const [salesSearch,setSalesSearch]   = useState("");
+  const [productsSearch,setProductsSearch] = useState("");
+  const [rawGoodsPage,setRawGoodsPage] = useState(0);
+  const [ordersPage,setOrdersPage]     = useState(0);
+  const [prodPageNum,setProdPageNum]   = useState(0);
   const [purchasesSearch,setPurchasesSearch] = useState("");
 
   const loadAll = async()=>{
@@ -279,7 +283,8 @@ export default function Dashboard(){
   // Add multi-product Order
   const addOrder = async()=>{
     setError("");
-    if(!orderCustomer.date||!orderCustomer.customer_name){setError("Date and customer name required");return;}
+    if(!orderCustomer.date){setError("Order date is required");return;}
+    if(!orderCustomer.customer_name){setError("Customer name is required");return;}
     const validItems = orderItems.filter(i=>i.product_name&&i.qty&&i.unit_price);
     if(validItems.length===0){setError("Add at least one product with qty and price");return;}
     setSaving(true);
@@ -395,11 +400,20 @@ export default function Dashboard(){
   };
 
   // Edit product
-  const openEditProduct = (prod) => {
+  const [editProdBuildInfo,setEditProdBuildInfo] = useState(null); // {ingredients,charges}
+  const openEditProduct = async (prod) => {
     setEditProdForm({name:prod.name,description:prod.description||"",defined_price:prod.defined_price,unit:prod.unit,qty_available:prod.qty_available,is_active:prod.is_active});
     setEditProdImage(null);
+    setEditProdBuildInfo(null);
     setShowEditProd(prod);
     setError("");
+    // Fetch ingredients & charges if this is a builder product
+    try {
+      const info = await get(`/products/${prod.id}/build-info`);
+      if(info && (info.ingredients?.length>0 || info.charges?.length>0)) {
+        setEditProdBuildInfo(info);
+      }
+    } catch(e) {}
   };
 
   const saveEditProduct = async () => {
@@ -559,7 +573,7 @@ export default function Dashboard(){
                 <div style={{position:"relative",marginBottom:14}}>
                   <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
                   <input type="text" placeholder="Search by supplier name or item..." value={purchasesSearch}
-                    onChange={e=>setPurchasesSearch(e.target.value)}
+                    onChange={e=>{setPurchasesSearch(e.target.value);setRawGoodsPage(0);}}
                     style={{...iStyle,paddingLeft:36,paddingRight:purchasesSearch?36:13}}/>
                   {purchasesSearch&&<button onClick={()=>setPurchasesSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.muted}}><X size={14}/></button>}
                 </div>
@@ -571,6 +585,8 @@ export default function Dashboard(){
                           p.supplier_name?.toLowerCase().includes(purchasesSearch.toLowerCase()) ||
                           p.item?.toLowerCase().includes(purchasesSearch.toLowerCase()))
                       : purchases;
+                    const PAGE_RG=10; const rgPages=Math.ceil(filtered.length/PAGE_RG);
+                    const paginatedRG=filtered.slice(rawGoodsPage*PAGE_RG,(rawGoodsPage+1)*PAGE_RG);
                     return (
                   <div style={{overflowX:"auto"}}>
                     {purchasesSearch&&<div style={{fontSize:11,color:C.textDim,marginBottom:10}}>{filtered.length} result{filtered.length!==1?"s":""} for "{purchasesSearch}"</div>}
@@ -580,8 +596,8 @@ export default function Dashboard(){
                       </tr></thead>
                       <tbody>
                         {filtered.length===0
-                          ? <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.muted}}>{purchasesSearch?"🔍 No results found":"📭 No purchases yet"}</td></tr>
-                          : filtered.map((p,i)=>(
+                          ? <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.muted}}>{purchasesSearch?"🔍 No results found":"📭 No raw goods yet"}</td></tr>
+                          : paginatedRG.map((p,i)=>(
                           <tr key={p.id} style={{borderBottom:`1px solid ${C.border}18`}}
                             onMouseEnter={e=>e.currentTarget.style.background="#ffffff05"}
                             onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
@@ -614,6 +630,15 @@ export default function Dashboard(){
                       </tbody>
                     </table>
                   </div>
+                    {rgPages>1&&(
+                      <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8,marginTop:16}}>
+                        <button onClick={()=>setRawGoodsPage(p=>Math.max(0,p-1))} disabled={rawGoodsPage===0}
+                          style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:rawGoodsPage===0?C.muted:C.text,cursor:rawGoodsPage===0?"not-allowed":"pointer",fontSize:12}}>← Prev</button>
+                        <span style={{color:C.textDim,fontSize:12}}>Page {rawGoodsPage+1} of {rgPages}</span>
+                        <button onClick={()=>setRawGoodsPage(p=>Math.min(rgPages-1,p+1))} disabled={rawGoodsPage===rgPages-1}
+                          style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:rawGoodsPage===rgPages-1?C.muted:C.text,cursor:rawGoodsPage===rgPages-1?"not-allowed":"pointer",fontSize:12}}>Next →</button>
+                      </div>
+                    )}
                     );
                   })()}
                 </div>
@@ -623,46 +648,82 @@ export default function Dashboard(){
             {/* ── PRODUCTS ── */}
             {tab==="Products"&&(
               <div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div>
                     <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Products</div>
-                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Final products for sale · all staff see and share the same list</div>
+                    <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Final products for sale · {products.length} total</div>
                   </div>
-                  <button onClick={()=>{setError("");setProdForm(emptyProd);setProdImage(null);setShowProdModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.purple,color:C.text,border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Product</button>
+                  <button onClick={()=>{setError("");setProdForm(emptyProd);setProdImage(null);setProdIngredients([]);setProdCharges([]);setProdBuildMode(false);setShowProdModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.purple,color:C.text,border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Product</button>
                 </div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:14}}>
-                  {products.length===0
-                    ? <div style={{color:C.muted,padding:40}}>No products yet. {isAdmin?"Add your first product!":"Ask admin to add products."}</div>
-                    : products.map(prod=>(
-                    <div key={prod.id} style={{background:C.card,border:`1px solid ${!prod.is_active?C.red+"44":prod.qty_available<=0?C.orange+"55":C.border}`,borderRadius:14,padding:18,width:210,position:"relative"}}>
-                      {prod.image_data
-                        ? <img src={prod.image_data} alt={prod.name} style={{width:"100%",height:130,objectFit:"cover",borderRadius:8,marginBottom:12}}/>
-                        : <div style={{width:"100%",height:130,background:C.card2,borderRadius:8,marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12}}>No image</div>}
-                      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,marginBottom:4}}>{prod.name}</div>
-                      {prod.description&&<div style={{color:C.textDim,fontSize:12,marginBottom:8}}>{prod.description}</div>}
-                      <div style={{color:C.accent,fontWeight:700,fontSize:18,fontFamily:"'Syne',sans-serif"}}>{fmt(prod.defined_price)}</div>
-                      <div style={{color:C.textDim,fontSize:11,marginTop:2}}>per {prod.unit}</div>
-
-                      {/* Stock badge - qty and unit clearly separated */}
-                      <div style={{marginTop:10,background:prod.qty_available>0?C.green+"18":C.orange+"18",border:`1px solid ${prod.qty_available>0?C.green+"44":C.orange+"44"}`,borderRadius:7,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span style={{fontSize:11,color:C.textDim}}>In Stock</span>
-                        <span style={{fontWeight:700,color:prod.qty_available>0?C.green:C.orange}}>
-                          <span style={{fontSize:15}}>{prod.qty_available}</span>
-                          <span style={{fontSize:10,fontWeight:500,color:C.textDim,marginLeft:4}}>{prod.unit}</span>
-                        </span>
-                      </div>
-
-                      {!prod.is_active&&<div style={{color:C.red,fontSize:11,marginTop:6}}>● Inactive</div>}
-
-                      {/* Edit + Delete — only for admin or staff with special permission */}
-                      {canEditDelete&&(
-                        <div style={{display:"flex",gap:6,marginTop:10}}>
-                          <button onClick={()=>openEditProduct(prod)} style={{flex:1,background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:7,padding:"6px 0",color:C.blue,cursor:"pointer",fontSize:12,fontWeight:600}}>✏️ Edit</button>
-                          <button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:7,padding:"6px 10px",color:C.red,cursor:"pointer",fontSize:12}}>🗑</button>
-                        </div>
-                      )}
+                {/* Search */}
+                <div style={{position:"relative",marginBottom:14}}>
+                  <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
+                  <input type="text" placeholder="Search by product name or description..." value={productsSearch}
+                    onChange={e=>{setProductsSearch(e.target.value);setProdPageNum(0);}}
+                    style={{...iStyle,paddingLeft:36,paddingRight:productsSearch?36:13}}/>
+                  {productsSearch&&<button onClick={()=>setProductsSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.muted}}><X size={14}/></button>}
+                </div>
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:20}}>
+                  {(()=>{
+                    const filtered = productsSearch.trim()
+                      ? products.filter(p=>p.name?.toLowerCase().includes(productsSearch.toLowerCase())||p.description?.toLowerCase().includes(productsSearch.toLowerCase()))
+                      : products;
+                    const PAGE=10; const pages=Math.ceil(filtered.length/PAGE);
+                    const paginated=filtered.slice(prodPageNum*PAGE,(prodPageNum+1)*PAGE);
+                    return(<>
+                    {productsSearch&&<div style={{fontSize:11,color:C.textDim,marginBottom:10}}>{filtered.length} result{filtered.length!==1?"s":""} for "{productsSearch}"</div>}
+                    <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                      <thead><tr style={{borderBottom:`1px solid ${C.border}`}}>
+                        {["Image","Product","Description","Price","Stock","Status","Actions"].map(c=><th key={c} style={{padding:"8px 10px",textAlign:"left",color:C.textDim,fontWeight:500,fontSize:10,letterSpacing:0.7,textTransform:"uppercase",whiteSpace:"nowrap"}}>{c}</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {paginated.length===0
+                          ? <tr><td colSpan={7} style={{padding:40,textAlign:"center",color:C.muted}}>{productsSearch?"🔍 No results found":"📭 No products yet"}</td></tr>
+                          : paginated.map(prod=>(
+                          <tr key={prod.id} style={{borderBottom:`1px solid ${C.border}18`}}
+                            onMouseEnter={e=>e.currentTarget.style.background="#ffffff05"}
+                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                            <td style={{padding:"8px 10px"}}>
+                              {prod.image_data
+                                ? <img src={prod.image_data} alt={prod.name} style={{width:48,height:48,objectFit:"cover",borderRadius:7,border:`1px solid ${C.border}`}}/>
+                                : <div style={{width:48,height:48,background:C.card2,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:10}}>No img</div>}
+                            </td>
+                            <td style={{padding:"8px 10px",fontFamily:"'Syne',sans-serif",fontWeight:700,color:C.text}}>{prod.name}</td>
+                            <td style={{padding:"8px 10px",color:C.textDim,maxWidth:180}}>{prod.description||"—"}</td>
+                            <td style={{padding:"8px 10px",color:C.accent,fontWeight:700,whiteSpace:"nowrap"}}>{fmt(prod.defined_price)}<span style={{color:C.muted,fontSize:10,fontWeight:400}}> /{prod.unit}</span></td>
+                            <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
+                              <span style={{fontWeight:700,color:prod.qty_available>0?C.green:C.orange}}>{prod.qty_available}</span>
+                              <span style={{color:C.muted,fontSize:10,marginLeft:4}}>{prod.unit}</span>
+                            </td>
+                            <td style={{padding:"8px 10px"}}><Badge label={prod.is_active?"Active":"Inactive"} color={prod.is_active?C.green:C.red}/></td>
+                            <td style={{padding:"8px 10px"}}>
+                              {canEditDelete&&(
+                                <div style={{display:"flex",gap:4}}>
+                                  <button onClick={()=>openEditProduct(prod)} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:5,padding:"4px 10px",color:C.blue,cursor:"pointer",fontSize:11,fontWeight:600}}>✏️ Edit</button>
+                                  <button onClick={()=>del(`/products/${prod.id}`).then(loadAll)} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:5,padding:"4px 8px",color:C.red,cursor:"pointer",fontSize:11}}>Del</button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                     </div>
-                  ))}
+                    {pages>1&&(
+                      <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8,marginTop:16}}>
+                        <button onClick={()=>setProdPageNum(p=>Math.max(0,p-1))} disabled={prodPage===0}
+                          style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:prodPageNum===0?C.muted:C.text,cursor:prodPageNum===0?"not-allowed":"pointer",fontSize:12}}>← Prev</button>
+                        {Array.from({length:pages},(_,i)=>(
+                          <button key={i} onClick={()=>setProdPageNum(i)}
+                            style={{background:i===prodPageNum?C.accent:C.card2,border:`1px solid ${i===prodPageNum?C.accent:C.border}`,borderRadius:7,padding:"5px 10px",color:i===prodPageNum?"#0a0a0f":C.text,cursor:"pointer",fontSize:12,fontWeight:i===prodPageNum?700:400}}>{i+1}</button>
+                        ))}
+                        <button onClick={()=>setProdPageNum(p=>Math.min(pages-1,p+1))} disabled={prodPage===pages-1}
+                          style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:prodPageNum===pages-1?C.muted:C.text,cursor:prodPageNum===pages-1?"not-allowed":"pointer",fontSize:12}}>Next →</button>
+                      </div>
+                    )}
+                    </>);
+                  })()}
                 </div>
               </div>
             )}
@@ -685,7 +746,7 @@ export default function Dashboard(){
                     type="text"
                     placeholder="Search by customer name or phone number..."
                     value={salesSearch}
-                    onChange={e=>setSalesSearch(e.target.value)}
+                    onChange={e=>{setSalesSearch(e.target.value);setOrdersPage(0);}}
                     style={{...iStyle,paddingLeft:36,paddingRight:salesSearch?36:13}}
                   />
                   {salesSearch&&<button onClick={()=>setSalesSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.muted}}><X size={14}/></button>}
@@ -698,6 +759,8 @@ export default function Dashboard(){
                           s.customer_name?.toLowerCase().includes(salesSearch.toLowerCase()) ||
                           s.customer_phone?.includes(salesSearch))
                       : sales;
+                    const PAGE_OR=10; const orPages=Math.ceil(filtered.length/PAGE_OR);
+                    const paginatedOR=filtered.slice(ordersPage*PAGE_OR,(ordersPage+1)*PAGE_OR);
                     return (
                     <div style={{overflowX:"auto"}}>
                       {salesSearch&&<div style={{fontSize:11,color:C.textDim,marginBottom:10}}>{filtered.length} result{filtered.length!==1?"s":""} for "{salesSearch}"</div>}
@@ -708,15 +771,28 @@ export default function Dashboard(){
                         <tbody>
                           {filtered.length===0
                             ? <tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.muted}}>{salesSearch?"🔍 No results found":"📭 No sales yet"}</td></tr>
-                            : filtered.map((s,i)=>(
+                            : paginatedOR.map((s,i)=>(
                             <tr key={s.id} style={{borderBottom:`1px solid ${C.border}18`,opacity:s.is_return?0.5:1}}
                               onMouseEnter={e=>e.currentTarget.style.background="#ffffff05"}
                               onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                               <td style={{padding:"10px 10px",color:C.text,whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
                               <td style={{padding:"10px 10px",color:C.text}}>{s.customer_name}{s.is_return&&<span style={{color:C.red,fontSize:10,marginLeft:4}}>RETURNED</span>}</td>
                               <td style={{padding:"10px 10px",color:C.textDim}}>{s.customer_phone||"—"}</td>
-                              <td style={{padding:"10px 10px",color:C.text,fontWeight:600}}>{s.product_name}</td>
-                              <td style={{padding:"10px 10px",color:C.text}}>{s.qty} {s.unit}</td>
+                              <td style={{padding:"10px 10px",color:C.text,fontWeight:600,maxWidth:200}}>
+                                {s.order_items&&s.order_items.length>0
+                                  ? <div>{s.order_items.map((oi,k)=>(
+                                      <div key={k} style={{fontSize:11,marginBottom:2}}>
+                                        <span style={{fontWeight:600}}>{oi.product_name}</span>
+                                        <span style={{color:C.textDim,fontWeight:400}}> × {oi.qty}</span>
+                                      </div>
+                                    ))}</div>
+                                  : <span>{s.product_name||"—"}</span>}
+                              </td>
+                              <td style={{padding:"10px 10px",color:C.text}}>
+                                {s.order_items&&s.order_items.length>0
+                                  ? <span style={{color:C.textDim,fontSize:11}}>{s.order_items.length} item{s.order_items.length!==1?"s":""}</span>
+                                  : <span>{s.qty} {s.unit}</span>}
+                              </td>
                               <td style={{padding:"10px 10px",fontWeight:600}}>{fmt(s.total)}</td>
                               <td style={{padding:"10px 10px",color:C.green,fontWeight:600}}>{fmt(s.paid_amount)}</td>
                               <td style={{padding:"10px 10px",color:s.due_amount>0?C.red:C.green,fontWeight:600}}>{s.due_amount>0?fmt(s.due_amount):"—"}</td>
@@ -735,6 +811,15 @@ export default function Dashboard(){
                         </tbody>
                       </table>
                     </div>
+                    {orPages>1&&(
+                      <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8,marginTop:16}}>
+                        <button onClick={()=>setOrdersPage(p=>Math.max(0,p-1))} disabled={ordersPage===0}
+                          style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:ordersPage===0?C.muted:C.text,cursor:ordersPage===0?"not-allowed":"pointer",fontSize:12}}>← Prev</button>
+                        <span style={{color:C.textDim,fontSize:12}}>Page {ordersPage+1} of {orPages}</span>
+                        <button onClick={()=>setOrdersPage(p=>Math.min(orPages-1,p+1))} disabled={ordersPage===orPages-1}
+                          style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:ordersPage===orPages-1?C.muted:C.text,cursor:ordersPage===orPages-1?"not-allowed":"pointer",fontSize:12}}>Next →</button>
+                      </div>
+                    )}
                     );
                   })()}
                 </div>
@@ -1070,9 +1155,10 @@ export default function Dashboard(){
                       <Field label={idx===0?"Item Name":""}>
                         <SelectInput value={ing.item_name} onChange={e=>{
                           const name=e.target.value;
-                          // Auto-fill unit from inventory
                           const invItem = inventory.find(i=>i.name===name);
-                          setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,item_name:name,unit:invItem?.unit||x.unit}:x));
+                          // Auto-fill unit_cost from most recent purchase of this item
+                          const recentPurch = purchases.filter(p=>p.item===name).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+                          setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,item_name:name,unit:invItem?.unit||x.unit,unit_cost:recentPurch?.unit_cost||""}:x));
                         }} placeholder="— Select item —" options={inventory.map(i=>({value:i.name,label:`${i.name} (${i.purchased} ${i.unit})`}))}/>
                       </Field>
                       <Field label={idx===0?"Qty":""}>
@@ -1419,6 +1505,42 @@ export default function Dashboard(){
                 options={[{value:"1",label:"Active — visible in Sales"},{value:"0",label:"Inactive — hidden from Sales"}]}/>
             </Field>
             <ImageUpload label="Update Image (optional)" currentImage={editProdImage?URL.createObjectURL(editProdImage):showEditProd.image_data} onUpload={setEditProdImage}/>
+            {editProdBuildInfo&&(editProdBuildInfo.ingredients.length>0||editProdBuildInfo.charges.length>0)&&(
+              <div style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+                <div style={{fontSize:11,color:C.textDim,marginBottom:10,letterSpacing:0.8}}>📦 PRODUCT COMPOSITION</div>
+                {editProdBuildInfo.ingredients.length>0&&(
+                  <>
+                    <div style={{fontSize:11,fontWeight:600,color:C.accent,marginBottom:6}}>🧪 Raw Materials</div>
+                    {editProdBuildInfo.ingredients.map((ing,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:`1px solid ${C.border}33`}}>
+                        <span style={{color:C.text}}>{ing.item_name} <span style={{color:C.textDim}}>× {ing.qty} {ing.unit}</span></span>
+                        <span style={{color:C.accent,fontWeight:600}}>{fmt(ing.qty*ing.unit_cost)}</span>
+                      </div>
+                    ))}
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6,color:C.textDim}}>
+                      <span>Materials subtotal</span>
+                      <span style={{color:C.accent,fontWeight:600}}>{fmt(editProdBuildInfo.ingredients.reduce((s,i)=>s+i.qty*i.unit_cost,0))}</span>
+                    </div>
+                  </>
+                )}
+                {editProdBuildInfo.charges.length>0&&(
+                  <>
+                    <div style={{fontSize:11,fontWeight:600,color:C.orange,marginTop:10,marginBottom:6}}>💰 Extra Charges</div>
+                    {editProdBuildInfo.charges.map((chg,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:`1px solid ${C.border}33`}}>
+                        <span style={{color:C.text}}>{chg.label}</span>
+                        <span style={{color:C.orange,fontWeight:600}}>{fmt(chg.amount)}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginTop:10,paddingTop:8,borderTop:`1px solid ${C.border}`}}>
+                  <span style={{fontWeight:700,color:C.text}}>Total Cost</span>
+                  <span style={{fontWeight:700,color:C.green}}>{fmt(editProdBuildInfo.ingredients.reduce((s,i)=>s+i.qty*i.unit_cost,0)+editProdBuildInfo.charges.reduce((s,c)=>s+c.amount,0))}</span>
+                </div>
+                <div style={{fontSize:10,color:C.muted,marginTop:6}}>⚡ To change ingredients, delete this product and recreate it with the builder.</div>
+              </div>
+            )}
             {error&&<div style={{color:C.red,fontSize:12,marginBottom:10}}>{error}</div>}
             {saveBtn("Save Changes",saveEditProduct,C.blue)}
           </Modal>

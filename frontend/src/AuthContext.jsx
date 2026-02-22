@@ -193,7 +193,7 @@ export function LoginPage({ onGoRegister }) {
       <div style={{ textAlign: "center", color: C.textDim, fontSize: 13, marginBottom: 26, marginTop: -18 }}>
         Sign in to your account
       </div>
-
+      <div onKeyDown={onKey}>
       <Field label="Email">
         <input type="email" placeholder="your@email.com" value={email}
           onChange={e => setEmail(e.target.value)} onKeyDown={onKey}
@@ -217,6 +217,7 @@ export function LoginPage({ onGoRegister }) {
 
       <SubmitBtn loading={loading} label="Sign In →" loadingLabel="Signing in..." onClick={handleLogin} />
 
+      </div>
       {onGoRegister && (
         <div style={{ textAlign: "center", marginTop: 18, color: C.textDim, fontSize: 13 }}>
           Don't have an account?{" "}
@@ -225,10 +226,6 @@ export function LoginPage({ onGoRegister }) {
           </span>
         </div>
       )}
-
-      <div style={{ textAlign: "center", marginTop: 10, color: C.muted, fontSize: 11 }}>
-        Press <kbd style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 6px", fontSize: 10 }}>Enter</kbd> to sign in
-      </div>
     </Card>
   );
 }
@@ -268,7 +265,7 @@ export function RegisterPage({ onGoLogin }) {
       <div style={{ textAlign: "center", color: C.textDim, fontSize: 13, marginBottom: 26, marginTop: -18 }}>
         Create your account
       </div>
-
+      <div onKeyDown={onKey}>
       <Field label="Full Name">
         <input type="text" placeholder="Your name" value={name}
           onChange={e => setName(e.target.value)} onKeyDown={onKey}
@@ -298,6 +295,7 @@ export function RegisterPage({ onGoLogin }) {
 
       <SubmitBtn loading={loading} label="Create Account" loadingLabel="Creating account..." onClick={handleRegister} />
 
+      </div>
       {onGoLogin && (
         <div style={{ textAlign: "center", marginTop: 18, color: C.textDim, fontSize: 13 }}>
           Already have one?{" "}
@@ -306,10 +304,6 @@ export function RegisterPage({ onGoLogin }) {
           </span>
         </div>
       )}
-
-      <div style={{ textAlign: "center", marginTop: 10, color: C.muted, fontSize: 11 }}>
-        Press <kbd style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 6px", fontSize: 10 }}>Enter</kbd> to create account
-      </div>
     </Card>
   );
 }

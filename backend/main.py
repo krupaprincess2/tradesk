@@ -488,7 +488,12 @@ def create_customer(data:CustomerCreate, user=Depends(get_current_user)):
 @app.get("/api/sales")
 def list_sales(user=Depends(get_current_user)):
     with get_db() as db:
-        return [dict(r) for r in db.execute("SELECT * FROM sales ORDER BY date DESC").fetchall()]
+        sales = [dict(r) for r in db.execute("SELECT * FROM sales ORDER BY date DESC").fetchall()]
+        # Attach order_items to each sale for multi-product display
+        for s in sales:
+            items = db.execute("SELECT * FROM order_items WHERE sale_id=? ORDER BY id", (s["id"],)).fetchall()
+            s["order_items"] = [dict(i) for i in items]
+        return sales
 
 @app.post("/api/sales", status_code=201)
 def create_sale(data:SaleCreate, user=Depends(get_current_user)):
