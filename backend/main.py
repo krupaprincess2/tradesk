@@ -519,56 +519,56 @@ def delete_product(pid:int, admin=Depends(require_admin)):
 def build_product(data:ProductBuildCreate, user=Depends(get_current_user)):
     """Create product from raw ingredients + extra charges. Auto-calculates defined_price."""
     try:
-      ingredients = data.ingredients or []
-      charges = data.charges or []
-      # Validate stock availability for each ingredient
-    # qty in each ingredient row is PER PRODUCT — total consumed = qty × qty_making
-    # available = total purchased - already committed to other product definitions
-    qty_making = max(1, float(data.qty_available) if data.qty_available else 1)
-    with get_db() as db:
-        for ing in ingredients:
-            item_name = ing.get("item_name","")
-            qty_per_product = float(ing.get("qty",0))
-            total_needed = qty_per_product * qty_making
-            if item_name and total_needed > 0:
-                purchased_row = db.execute(
-                    "SELECT COALESCE(SUM(qty),0) as total FROM purchases WHERE item=?",
-                    (item_name,)
-                ).fetchone()
-                used_row = db.execute(
-                    """SELECT COALESCE(SUM(pi.qty),0) as used
-                       FROM product_ingredients pi
-                       JOIN products pr ON pr.id = pi.product_id
-                       WHERE pi.item_name=?""",
-                    (item_name,)
-                ).fetchone()
-                purchased = float(purchased_row["total"]) if purchased_row else 0
-                already_used = float(used_row["used"]) if used_row else 0
-                available = purchased - already_used
-                if total_needed > available:
-                    raise HTTPException(400,
-                        f"Not enough stock for '{item_name}' — "
-                        f"{qty_per_product} per product × {qty_making} products = {total_needed} needed, "
-                        f"but only {available} available")
-    # Calculate total cost from ingredients
-    ingredients_cost = sum(float(i.get("qty",0)) * float(i.get("unit_cost",0)) for i in ingredients)
-    charges_total = sum(float(c.get("amount",0)) for c in charges)
-    defined_price = ingredients_cost + charges_total
-    with get_db() as db:
-        cur = db.execute("INSERT INTO products(name,description,defined_price,unit,qty_available,is_active) VALUES(?,?,?,?,?,?)",
-            (data.name, data.description, defined_price, data.unit, data.qty_available, data.is_active))
-        pid = cur.lastrowid
-        for ing in ingredients:
-            db.execute("INSERT INTO product_ingredients(product_id,item_name,qty,unit,unit_cost) VALUES(?,?,?,?,?)",
-                (pid, ing.get("item_name",""), float(ing.get("qty",0)), ing.get("unit","units"), float(ing.get("unit_cost",0))))
-        for chg in charges:
-            db.execute("INSERT INTO product_charges(product_id,label,amount) VALUES(?,?,?)",
-                (pid, chg.get("label",""), float(chg.get("amount",0))))
-        db.commit()
-        prod = dict(db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone())
-        prod["ingredients"] = [dict(r) for r in db.execute("SELECT * FROM product_ingredients WHERE product_id=?",(pid,)).fetchall()]
-        prod["charges"] = [dict(r) for r in db.execute("SELECT * FROM product_charges WHERE product_id=?",(pid,)).fetchall()]
-        return prod
+        ingredients = data.ingredients or []
+        charges = data.charges or []
+        # qty per ingredient row is PER PRODUCT — total consumed = qty × qty_making
+        qty_making = max(1, float(data.qty_available) if data.qty_available else 1)
+        with get_db() as db:
+            for ing in ingredients:
+                item_name = ing.get("item_name","")
+                qty_per_product = float(ing.get("qty",0))
+                total_needed = qty_per_product * qty_making
+                if item_name and total_needed > 0:
+                    purchased_row = db.execute(
+                        "SELECT COALESCE(SUM(qty),0) as total FROM purchases WHERE item=?",
+                        (item_name,)
+                    ).fetchone()
+                    used_row = db.execute(
+                        "SELECT COALESCE(SUM(pi.qty),0) as used "
+                        "FROM product_ingredients pi "
+                        "JOIN products pr ON pr.id = pi.product_id "
+                        "WHERE pi.item_name=?",
+                        (item_name,)
+                    ).fetchone()
+                    purchased = float(purchased_row["total"]) if purchased_row else 0
+                    already_used = float(used_row["used"]) if used_row else 0
+                    available = purchased - already_used
+                    if total_needed > available:
+                        raise HTTPException(400,
+                            f"Not enough stock for '{item_name}' — "
+                            f"{qty_per_product} per product × {qty_making} products = {total_needed} needed, "
+                            f"but only {available} available")
+        ingredients_cost = sum(float(i.get("qty",0)) * float(i.get("unit_cost",0)) for i in ingredients)
+        charges_total = sum(float(c.get("amount",0)) for c in charges)
+        defined_price = ingredients_cost + charges_total
+        with get_db() as db:
+            cur = db.execute(
+                "INSERT INTO products(name,description,defined_price,unit,qty_available,is_active) VALUES(?,?,?,?,?,?)",
+                (data.name, data.description, defined_price, data.unit or "pcs", data.qty_available or 0, data.is_active))
+            pid = cur.lastrowid
+            for ing in ingredients:
+                db.execute(
+                    "INSERT INTO product_ingredients(product_id,item_name,qty,unit,unit_cost) VALUES(?,?,?,?,?)",
+                    (pid, ing.get("item_name",""), float(ing.get("qty",0)), ing.get("unit","units"), float(ing.get("unit_cost",0))))
+            for chg in charges:
+                db.execute(
+                    "INSERT INTO product_charges(product_id,label,amount) VALUES(?,?,?)",
+                    (pid, chg.get("label",""), float(chg.get("amount",0))))
+            db.commit()
+            prod = dict(db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone())
+            prod["ingredients"] = [dict(r) for r in db.execute("SELECT * FROM product_ingredients WHERE product_id=?",(pid,)).fetchall()]
+            prod["charges"] = [dict(r) for r in db.execute("SELECT * FROM product_charges WHERE product_id=?",(pid,)).fetchall()]
+            return prod
     except HTTPException:
         raise
     except Exception as e:
@@ -735,53 +735,53 @@ def delete_sale(sid:int, user=Depends(get_current_user)):
 def create_order(data:OrderCreate, user=Depends(get_current_user)):
     """Create an order with multiple product line items."""
     try:
-      items = data.items or []
-      if not items: raise HTTPException(400, "Order must have at least one item")
-    total = sum(float(i.get("qty",0)) * float(i.get("unit_price",0)) for i in items)
-    paid  = min(data.paid_amount, total)
-    due   = total - paid
-    status = "paid" if paid>=total else ("partial" if paid>0 else "unpaid")
-    # For display, join product names
-    product_name = ", ".join(i.get("product_name","") for i in items[:3])
-    if len(items) > 3: product_name += f" +{len(items)-3} more"
-    qty_display = sum(float(i.get("qty",0)) for i in items)
-    with get_db() as db:
-        # Stock check + deduct
-        for i in items:
-            pid = i.get("product_id")
-            qty = float(i.get("qty",0))
-            if pid:
-                prod = db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
-                if prod and prod["qty_available"] < qty:
-                    raise HTTPException(400, f"Not enough stock for {i.get('product_name')}. Available: {prod['qty_available']}")
-                if prod:
-                    db.execute("UPDATE products SET qty_available=qty_available-? WHERE id=?", (qty, pid))
-        if data.customer_phone:
-            if not db.execute("SELECT id FROM customers WHERE phone=?", (data.customer_phone,)).fetchone():
-                db.execute("INSERT INTO customers(name,phone,address) VALUES(?,?,?)",
-                    (data.customer_name, data.customer_phone, data.customer_addr))
-        cur = db.execute("""INSERT INTO sales(added_by,date,customer_name,customer_phone,customer_addr,
-            product_id,product_name,qty,unit,defined_price,unit_price,total,paid_amount,due_amount,payment_status,notes)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (user["id"],data.date,data.customer_name,data.customer_phone,data.customer_addr,
-             None,product_name,qty_display,"pcs",0,total/qty_display if qty_display>0 else 0,
-             total,paid,due,status,data.notes))
-        sale_id = cur.lastrowid
-        for i in items:
-            db.execute("INSERT INTO order_items(sale_id,product_id,product_name,qty,unit,unit_price,total) VALUES(?,?,?,?,?,?,?)",
-                (sale_id, i.get("product_id"), i.get("product_name",""), float(i.get("qty",0)),
-                 i.get("unit","pcs"), float(i.get("unit_price",0)),
-                 float(i.get("qty",0))*float(i.get("unit_price",0))))
-        if paid>0:
-            db.execute("INSERT INTO sale_payments(sale_id,added_by,amount,date,notes) VALUES(?,?,?,?,?)",
-                (sale_id,user["id"],paid,data.date, data.payment_notes or "Initial payment"))
-        db.commit()
-        return dict(db.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone())
+        items = data.items or []
+        if not items: raise HTTPException(400, "Order must have at least one item")
+        total = sum(float(i.get("qty",0)) * float(i.get("unit_price",0)) for i in items)
+        paid  = min(data.paid_amount, total)
+        due   = total - paid
+        status = "paid" if paid>=total else ("partial" if paid>0 else "unpaid")
+        product_name = ", ".join(i.get("product_name","") for i in items[:3])
+        if len(items) > 3: product_name += f" +{len(items)-3} more"
+        qty_display = sum(float(i.get("qty",0)) for i in items)
+        with get_db() as db:
+            for i in items:
+                pid = i.get("product_id")
+                qty = float(i.get("qty",0))
+                if pid:
+                    prod = db.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+                    if prod and prod["qty_available"] < qty:
+                        raise HTTPException(400, f"Not enough stock for {i.get('product_name')}. Available: {prod['qty_available']}")
+                    if prod:
+                        db.execute("UPDATE products SET qty_available=qty_available-? WHERE id=?", (qty, pid))
+            if data.customer_phone:
+                if not db.execute("SELECT id FROM customers WHERE phone=?", (data.customer_phone,)).fetchone():
+                    db.execute("INSERT INTO customers(name,phone,address) VALUES(?,?,?)",
+                        (data.customer_name, data.customer_phone, data.customer_addr))
+            cur = db.execute(
+                "INSERT INTO sales(added_by,date,customer_name,customer_phone,customer_addr,"
+                "product_id,product_name,qty,unit,defined_price,unit_price,total,paid_amount,due_amount,payment_status,notes)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (user["id"],data.date,data.customer_name,data.customer_phone,data.customer_addr,
+                 None,product_name,qty_display,"pcs",0,total/qty_display if qty_display>0 else 0,
+                 total,paid,due,status,data.notes))
+            sale_id = cur.lastrowid
+            for i in items:
+                db.execute(
+                    "INSERT INTO order_items(sale_id,product_id,product_name,qty,unit,unit_price,total) VALUES(?,?,?,?,?,?,?)",
+                    (sale_id, i.get("product_id"), i.get("product_name",""), float(i.get("qty",0)),
+                     "pcs", float(i.get("unit_price",0)),
+                     float(i.get("qty",0))*float(i.get("unit_price",0))))
+            if paid>0:
+                db.execute(
+                    "INSERT INTO sale_payments(sale_id,added_by,amount,date,notes) VALUES(?,?,?,?,?)",
+                    (sale_id,user["id"],paid,data.date, data.payment_notes or "Initial payment"))
+            db.commit()
+            return dict(db.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone())
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(500, f"Failed to create order: {str(e)}")
-
 @app.get("/api/orders/{sid}/items")
 def get_order_items(sid:int, user=Depends(get_current_user)):
     with get_db() as db:
