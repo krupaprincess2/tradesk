@@ -13,6 +13,11 @@ const forceLogout = () => window.dispatchEvent(new Event("auth:logout"));
 
 const handleRes = async (r) => {
   if(r.status === 401){ forceLogout(); throw new Error("Session expired"); }
+  const ct = r.headers.get("content-type")||"";
+  if(!ct.includes("application/json")){
+    const txt = await r.text();
+    throw new Error(r.ok ? "OK" : `Server error (${r.status})`);
+  }
   const d = await r.json();
   if(!r.ok) throw new Error(d.detail||"Failed");
   return d;
@@ -598,6 +603,13 @@ export default function Dashboard(){
                   </div>
                 )}
 
+                {purchases.length===0&&!purchasesSearch
+                  ? <div style={{textAlign:"center",padding:"60px 20px",color:C.muted}}>
+                      <div style={{fontSize:36,marginBottom:12}}>📦</div>
+                      <div style={{fontSize:15,fontWeight:600,color:C.textDim,marginBottom:6}}>No raw goods yet</div>
+                      <div style={{fontSize:13}}>Click "+ Add Raw Good" to record your first purchase.</div>
+                    </div>
+                  : <>
                 {/* Search bar */}
                 <div style={{position:"relative",marginBottom:14}}>
                   <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
@@ -670,7 +682,8 @@ export default function Dashboard(){
                     )}
                     </>);
                   })()}
-                </div>
+                </div>}
+                  </>}
               </div>
             )}
 
@@ -685,6 +698,13 @@ export default function Dashboard(){
                   <button onClick={()=>{setError("");setProdForm(emptyProd);setProdImage(null);setProdIngredients([]);setProdCharges([]);setProdBuildMode(false);setShowProdModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.purple,color:C.text,border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Product</button>
                 </div>
                 {error&&<div style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,color:C.red,fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>⚠️ {error}</span><button onClick={()=>setError("")} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:16,lineHeight:1}}>×</button></div>}
+                {products.length===0&&!productsSearch
+                  ? <div style={{textAlign:"center",padding:"60px 20px",color:C.muted}}>
+                      <div style={{fontSize:36,marginBottom:12}}>🏷️</div>
+                      <div style={{fontSize:15,fontWeight:600,color:C.textDim,marginBottom:6}}>No products yet</div>
+                      <div style={{fontSize:13}}>Click "+ Add Product" to define your first product.</div>
+                    </div>
+                  : <>
                 {/* Search */}
                 <div style={{position:"relative",marginBottom:14}}>
                   <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
@@ -755,6 +775,7 @@ export default function Dashboard(){
                     </>);
                   })()}
                 </div>
+              </>}
               </div>
             )}
 
@@ -770,6 +791,13 @@ export default function Dashboard(){
                 </div>
 
                 {error&&<div style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,color:C.red,fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>⚠️ {error}</span><button onClick={()=>setError("")} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:16,lineHeight:1}}>×</button></div>}
+                {sales.length===0&&!salesSearch
+                  ? <div style={{textAlign:"center",padding:"60px 20px",color:C.muted}}>
+                      <div style={{fontSize:36,marginBottom:12}}>🧾</div>
+                      <div style={{fontSize:15,fontWeight:600,color:C.textDim,marginBottom:6}}>No orders yet</div>
+                      <div style={{fontSize:13}}>Click "+ New Order" to record your first sale.</div>
+                    </div>
+                  : <>
                 {/* Search bar above table */}
                 <div style={{position:"relative",marginBottom:14}}>
                   <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
@@ -854,6 +882,7 @@ export default function Dashboard(){
                     </>);
                   })()}
                 </div>
+              </>}
               </div>
             )}
 
@@ -1120,7 +1149,6 @@ export default function Dashboard(){
             <Field label="Item / Raw Material Name"><Input type="text" placeholder="e.g. Pearls, Gold Thread, Silver Wire" value={pForm.item} onChange={e=>setPForm(f=>({...f,item:e.target.value}))}/></Field>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
               <Field label="Quantity"><Input type="number" placeholder="0" value={pForm.qty} onChange={e=>setPForm(f=>({...f,qty:e.target.value}))}/></Field>
-              <Field label="Unit"><Input type="text" placeholder="pcs/grams" value={pForm.unit} onChange={e=>setPForm(f=>({...f,unit:e.target.value}))}/></Field>
               <Field label="Unit Cost (₹)"><Input type="number" placeholder="0" value={pForm.unit_cost} onChange={e=>setPForm(f=>({...f,unit_cost:e.target.value}))}/></Field>
             </div>
             {pForm.qty&&pForm.unit_cost&&(
@@ -1164,7 +1192,6 @@ export default function Dashboard(){
             <Field label="Description (optional)"><Input type="text" placeholder="Brief description" value={prodForm.description} onChange={e=>setProdForm(f=>({...f,description:e.target.value}))}/></Field>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               {!prodBuildMode&&<Field label="Defined Price (₹)"><Input type="number" placeholder="0" value={prodForm.defined_price} onChange={e=>setProdForm(f=>({...f,defined_price:e.target.value}))}/></Field>}
-              <Field label="Unit"><Input type="text" placeholder="pcs/set" value={prodForm.unit} onChange={e=>setProdForm(f=>({...f,unit:e.target.value}))}/></Field>
               <Field label={prodBuildMode?"Qty You're Making (products)":"Qty Available"}><Input type="number" placeholder={prodBuildMode?"1":"0"} value={prodForm.qty_available} onChange={e=>setProdForm(f=>({...f,qty_available:e.target.value}))}/>
                 {prodBuildMode&&<div style={{fontSize:10,color:C.textDim,marginTop:3}}>How many finished products are you making from these materials?</div>}
               </Field>
@@ -1184,7 +1211,7 @@ export default function Dashboard(){
                     <div style={{color:C.muted,fontSize:12,textAlign:"center",padding:"10px 0"}}>No ingredients yet. Click "Add Item" to select raw materials.</div>
                   )}
                   {prodIngredients.map((ing,idx)=>(
-                    <div key={idx} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr auto",gap:8,marginBottom:8,alignItems:"end"}}>
+                    <div key={idx} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:8,marginBottom:8,alignItems:"end"}}>
                       <Field label={idx===0?"Item Name":""}>
                         <SelectInput value={ing.item_name} onChange={e=>{
                           const name=e.target.value;
@@ -1235,9 +1262,7 @@ export default function Dashboard(){
                           </>;
                         })()}
                       </Field>
-                      <Field label={idx===0?"Unit":""}>
-                        <Input type="text" placeholder="pcs" value={ing.unit} onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,unit:e.target.value}:x))}/>
-                      </Field>
+
                       <Field label={idx===0?"Cost/Unit (₹)":""}>
                         <Input type="number" placeholder="0" value={ing.unit_cost} onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,unit_cost:e.target.value}:x))}/>
                       </Field>
@@ -1358,7 +1383,7 @@ export default function Dashboard(){
                   </Field>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                     <Field label="Qty"><Input type="number" placeholder="0" value={item.qty} onChange={e=>setOrderItems(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/></Field>
-                    <Field label="Unit"><Input type="text" value={item.unit} onChange={e=>setOrderItems(arr=>arr.map((x,i)=>i===idx?{...x,unit:e.target.value}:x))}/></Field>
+
                     <Field label="Price/Unit (₹)">
                       <Input type="number" placeholder="0" value={item.unit_price} onChange={e=>{
                         const price=e.target.value;
@@ -1565,7 +1590,7 @@ export default function Dashboard(){
             <Field label="Description"><Input type="text" placeholder="Optional" value={editProdForm.description} onChange={e=>setEditProdForm(f=>({...f,description:e.target.value}))}/></Field>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <Field label="Defined Price (₹)"><Input type="number" value={editProdForm.defined_price} onChange={e=>setEditProdForm(f=>({...f,defined_price:e.target.value}))}/></Field>
-              <Field label="Unit"><Input type="text" value={editProdForm.unit} onChange={e=>setEditProdForm(f=>({...f,unit:e.target.value}))}/></Field>
+
             </div>
             <Field label="Available Quantity">
               <Input type="number" placeholder="How many available to sell" value={editProdForm.qty_available} onChange={e=>setEditProdForm(f=>({...f,qty_available:e.target.value}))}/>

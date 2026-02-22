@@ -13,7 +13,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 JWT_SECRET     = os.getenv("JWT_SECRET", "tradesk_secret_2026")
 # DEPLOY_VERSION: change this value to force all users to re-login immediately
 # Update this in Railway env vars OR just change the default value below
-DEPLOY_VERSION = os.getenv("DEPLOY_VERSION", "v5")  # bumped → invalidates all old sessions
+DEPLOY_VERSION = os.getenv("DEPLOY_VERSION", "v6")  # bumped → invalidates all old sessions
 # Combine secret + version so changing DEPLOY_VERSION invalidates all existing tokens
 _EFFECTIVE_SECRET = f"{JWT_SECRET}_{DEPLOY_VERSION}"
 DB_PATH        = os.getenv("DB_PATH", "tradesk.db")
