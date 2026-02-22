@@ -446,6 +446,12 @@ def delete_purchase(pid:int, user=Depends(get_current_user)):
             # Delete purchase_payments first (no ON DELETE CASCADE on this FK)
             db.execute("DELETE FROM purchase_payments WHERE purchase_id=?", (pid,))
             db.execute("DELETE FROM purchases WHERE id=?", (pid,))
+            # Clean up raw_items entry if no more purchases exist for this item
+            remaining = db.execute(
+                "SELECT COUNT(*) as cnt FROM purchases WHERE item=?", (p["item"],)
+            ).fetchone()
+            if remaining and remaining["cnt"] == 0:
+                db.execute("DELETE FROM raw_items WHERE name=?", (p["item"],))
             db.commit()
             return {"success": True}
     except HTTPException:
@@ -854,6 +860,7 @@ def get_return_dues(user=Depends(get_current_user)):
 @app.get("/api/analytics/inventory")
 def get_inventory(user=Depends(get_current_user)):
     with get_db() as db:
+        # Only show items that have at least one existing purchase record
         return [dict(r) for r in db.execute("""
             SELECT r.name, r.unit, r.low_stock_threshold,
                 COALESCE(p.qty,0) as purchased,
@@ -862,10 +869,11 @@ def get_inventory(user=Depends(get_current_user)):
                 CASE WHEN (COALESCE(p.qty,0) - COALESCE(pi.used,0)) <= r.low_stock_threshold
                      AND r.low_stock_threshold > 0 THEN 1 ELSE 0 END as is_low
             FROM raw_items r
-            LEFT JOIN (SELECT item, SUM(qty) as qty FROM purchases GROUP BY item) p
+            INNER JOIN (SELECT item, SUM(qty) as qty FROM purchases GROUP BY item) p
                 ON p.item = r.name
             LEFT JOIN (SELECT item_name, SUM(qty) as used FROM product_ingredients GROUP BY item_name) pi
                 ON pi.item_name = r.name
+            WHERE COALESCE(p.qty,0) > 0
         """).fetchall()]
 
 @app.get("/health")

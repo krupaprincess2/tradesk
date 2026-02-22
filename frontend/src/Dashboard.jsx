@@ -835,7 +835,7 @@ export default function Dashboard(){
                               onMouseEnter={e=>e.currentTarget.style.background="#ffffff05"}
                               onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                               <td style={{padding:"10px 10px",color:C.text,whiteSpace:"nowrap"}}>{fmtDate(s.date)}</td>
-                              <td style={{padding:"10px 10px",color:C.text}}>{s.customer_name}{s.is_return&&<span style={{color:C.red,fontSize:10,marginLeft:4}}>RETURNED</span>}</td>
+                              <td style={{padding:"10px 10px",color:C.text}}>{s.customer_name}{!!s.is_return&&<span style={{color:C.red,fontSize:10,marginLeft:4}}>RETURNED</span>}</td>
                               <td style={{padding:"10px 10px",color:C.textDim}}>{s.customer_phone||"—"}</td>
                               <td style={{padding:"10px 10px",color:C.text,fontWeight:600,maxWidth:200}}>
                                 {s.order_items&&s.order_items.length>0
@@ -1663,12 +1663,22 @@ export default function Dashboard(){
                   <th style={{textAlign:"right",padding:"5px 0"}}>Rate</th>
                   <th style={{textAlign:"right",padding:"5px 0"}}>Amount</th>
                 </tr></thead>
-                <tbody><tr>
-                  <td style={{padding:"9px 0",color:C.text}}>{showInvoice.product_name}</td>
-                  <td style={{textAlign:"right",color:C.text}}>{showInvoice.qty} {showInvoice.unit}</td>
-                  <td style={{textAlign:"right",color:C.text}}>{fmt(showInvoice.unit_price)}</td>
-                  <td style={{textAlign:"right",color:C.text,fontWeight:600}}>{fmt(showInvoice.total)}</td>
-                </tr></tbody>
+                <tbody>
+                  {showInvoice.order_items&&showInvoice.order_items.length>0
+                    ? showInvoice.order_items.map((oi,k)=>(
+                        <tr key={k} style={{borderBottom:`1px solid ${C.border}18`}}>
+                          <td style={{padding:"9px 0",color:C.text}}>{oi.product_name}</td>
+                          <td style={{textAlign:"right",color:C.text}}>{oi.qty}</td>
+                          <td style={{textAlign:"right",color:C.text}}>{fmt(oi.unit_price)}</td>
+                          <td style={{textAlign:"right",color:C.text,fontWeight:600}}>{fmt(oi.total)}</td>
+                        </tr>))
+                    : <tr>
+                        <td style={{padding:"9px 0",color:C.text}}>{showInvoice.product_name}</td>
+                        <td style={{textAlign:"right",color:C.text}}>{showInvoice.qty}</td>
+                        <td style={{textAlign:"right",color:C.text}}>{fmt(showInvoice.unit_price)}</td>
+                        <td style={{textAlign:"right",color:C.text,fontWeight:600}}>{fmt(showInvoice.total)}</td>
+                      </tr>}
+                </tbody>
               </table>
               <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:5,fontSize:13}}><span style={{color:C.textDim}}>Total</span><span style={{fontWeight:700}}>{fmt(showInvoice.total)}</span></div>
@@ -1678,6 +1688,71 @@ export default function Dashboard(){
                   : <div style={{display:"flex",justifyContent:"space-between",background:`${C.green}11`,padding:"8px 12px",borderRadius:7,marginTop:5}}><span style={{color:C.green,fontWeight:600}}>✓ Fully Paid</span><span style={{color:C.green,fontWeight:700}}>CLEARED</span></div>}
               </div>
               <div style={{textAlign:"center",color:C.muted,fontSize:11,marginTop:14}}>Thank you for your business!</div>
+              <div style={{display:"flex",gap:8,marginTop:16}}>
+                <button onClick={()=>{
+                  const el = document.getElementById("invoice-print-area");
+                  const w = window.open("","_blank","width=700,height=900");
+                  w.document.write(`<!DOCTYPE html><html><head><title>Invoice INV-${String((showInvoice.idx||0)+1).padStart(3,"0")}</title><style>
+                    *{margin:0;padding:0;box-sizing:border-box;}
+                    body{font-family:sans-serif;background:#fff;color:#111;padding:32px;}
+                    .header{display:flex;justify-content:space-between;margin-bottom:20px;}
+                    .brand{font-size:22px;font-weight:800;}.brand span{color:#f0c040;}
+                    .sub{color:#888;font-size:12px;}
+                    .divider{border-top:1px solid #ddd;margin:12px 0;padding-top:12px;}
+                    .label{font-size:10px;letter-spacing:1px;color:#888;margin-bottom:5px;}
+                    table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;}
+                    th{text-align:left;padding:6px 0;border-bottom:1px solid #ddd;color:#666;font-size:11px;}
+                    th:not(:first-child){text-align:right;}
+                    td{padding:9px 0;border-bottom:1px solid #f0f0f0;}
+                    td:not(:first-child){text-align:right;}
+                    .totals{border-top:1px solid #ddd;padding-top:10px;}
+                    .total-row{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;}
+                    .paid{color:#22c55e;font-weight:600;}
+                    .due-box{display:flex;justify-content:space-between;background:#fff0f0;border:1px solid #ffcccc;border-radius:6px;padding:8px 12px;margin-top:6px;}
+                    .due-label{color:#cc0000;font-weight:600;}
+                    .paid-box{display:flex;justify-content:space-between;background:#f0fff4;border:1px solid #bbf7d0;border-radius:6px;padding:8px 12px;margin-top:6px;}
+                    .paid-label{color:#16a34a;font-weight:600;}
+                    .footer{text-align:center;color:#aaa;font-size:11px;margin-top:24px;}
+                  </style></head><body>
+                  <div class="header">
+                    <div><div class="brand">Trade<span>Desk</span></div><div class="sub">Business Invoice</div></div>
+                    <div style="text-align:right;font-size:11px;color:#888;">
+                      <div>Date: ${showInvoice.date}</div>
+                      <div>INV-${String((showInvoice.idx||0)+1).padStart(3,"0")}</div>
+                    </div>
+                  </div>
+                  <div class="divider">
+                    <div class="label">BILL TO</div>
+                    <div style="font-weight:700;font-size:15px;">${showInvoice.customer_name}</div>
+                    ${showInvoice.customer_phone?`<div style="color:#888;font-size:12px;margin-top:3px;">📞 ${showInvoice.customer_phone}</div>`:""}
+                    ${showInvoice.customer_addr?`<div style="color:#888;font-size:12px;margin-top:2px;">📍 ${showInvoice.customer_addr}</div>`:""}
+                  </div>
+                  <table>
+                    <thead><tr><th>Product</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+                    <tbody>
+                      ${(showInvoice.order_items&&showInvoice.order_items.length>0
+                        ? showInvoice.order_items
+                        : [{product_name:showInvoice.product_name,qty:showInvoice.qty,unit_price:showInvoice.unit_price,total:showInvoice.total}]
+                      ).map(oi=>`<tr><td>${oi.product_name}</td><td style="text-align:right">${oi.qty}</td><td style="text-align:right">₹${Number(oi.unit_price).toLocaleString("en-IN",{minimumFractionDigits:2})}</td><td style="text-align:right;font-weight:600">₹${Number(oi.total).toLocaleString("en-IN",{minimumFractionDigits:2})}</td></tr>`).join("")}
+                    </tbody>
+                  </table>
+                  <div class="totals">
+                    <div class="total-row"><span style="color:#666">Total</span><span style="font-weight:700">₹${Number(showInvoice.total).toLocaleString("en-IN",{minimumFractionDigits:2})}</span></div>
+                    <div class="total-row paid"><span>Paid</span><span>₹${Number(showInvoice.paid_amount).toLocaleString("en-IN",{minimumFractionDigits:2})}</span></div>
+                    ${showInvoice.due_amount>0
+                      ?`<div class="due-box"><span class="due-label">⚠️ Balance Due</span><span class="due-label" style="font-size:16px">₹${Number(showInvoice.due_amount).toLocaleString("en-IN",{minimumFractionDigits:2})}</span></div>`
+                      :`<div class="paid-box"><span class="paid-label">✓ Fully Paid</span><span class="paid-label">CLEARED</span></div>`}
+                  </div>
+                  <div class="footer">Thank you for your business!</div>
+                  </body></html>`);
+                  w.document.close();
+                  w.focus();
+                  setTimeout(()=>{ w.print(); }, 400);
+                }}
+                style={{flex:1,background:"#1a1a2e",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 0",cursor:"pointer",color:C.text,fontWeight:700,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                  🖨️ Print Invoice
+                </button>
+              </div>
             </div>
           </Modal>
         )}
