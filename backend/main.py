@@ -393,15 +393,24 @@ def delete_purchase(pid:int, user=Depends(get_current_user)):
     with get_db() as db:
         p = db.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone()
         if not p: raise HTTPException(404, "Purchase not found")
-        # Block if this raw material is used in any product definition
-        used = db.execute(
-            "SELECT COUNT(*) as cnt FROM product_ingredients WHERE item_name=?",
-            (p["item"],)
-        ).fetchone()
+        # Block only if this raw material is used in a product that STILL EXISTS
+        # (join with products table to ignore any orphaned ingredient rows)
+        used = db.execute("""
+            SELECT COUNT(*) as cnt, GROUP_CONCAT(pr.name, ', ') as product_names
+            FROM product_ingredients pi
+            JOIN products pr ON pr.id = pi.product_id
+            WHERE pi.item_name = ?
+        """, (p["item"],)).fetchone()
         if used and used["cnt"] > 0:
             raise HTTPException(400,
-                f"Cannot delete: '{p['item']}' is used in {used['cnt']} product definition(s). "
+                f"Cannot delete: '{p['item']}' is still used in product(s): {used['product_names']}. "
                 f"Delete those products first.")
+        # Clean up any orphaned product_ingredients rows for this item (safety)
+        db.execute("""
+            DELETE FROM product_ingredients
+            WHERE item_name = ?
+              AND product_id NOT IN (SELECT id FROM products)
+        """, (p["item"],))
         db.execute("DELETE FROM purchases WHERE id=?", (pid,))
         db.commit()
         return {"success": True}
