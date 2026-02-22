@@ -587,7 +587,7 @@ export default function Dashboard(){
                       : purchases;
                     const PAGE_RG=10; const rgPages=Math.ceil(filtered.length/PAGE_RG);
                     const paginatedRG=filtered.slice(rawGoodsPage*PAGE_RG,(rawGoodsPage+1)*PAGE_RG);
-                    return (
+                    return (<>
                   <div style={{overflowX:"auto"}}>
                     {purchasesSearch&&<div style={{fontSize:11,color:C.textDim,marginBottom:10}}>{filtered.length} result{filtered.length!==1?"s":""} for "{purchasesSearch}"</div>}
                     <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
@@ -639,7 +639,7 @@ export default function Dashboard(){
                           style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:rawGoodsPage===rgPages-1?C.muted:C.text,cursor:rawGoodsPage===rgPages-1?"not-allowed":"pointer",fontSize:12}}>Next →</button>
                       </div>
                     )}
-                    );
+                    </>);
                   })()}
                 </div>
               </div>
@@ -712,13 +712,13 @@ export default function Dashboard(){
                     </div>
                     {pages>1&&(
                       <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8,marginTop:16}}>
-                        <button onClick={()=>setProdPageNum(p=>Math.max(0,p-1))} disabled={prodPage===0}
+                        <button onClick={()=>setProdPageNum(p=>Math.max(0,p-1))} disabled={prodPageNum===0}
                           style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:prodPageNum===0?C.muted:C.text,cursor:prodPageNum===0?"not-allowed":"pointer",fontSize:12}}>← Prev</button>
                         {Array.from({length:pages},(_,i)=>(
                           <button key={i} onClick={()=>setProdPageNum(i)}
                             style={{background:i===prodPageNum?C.accent:C.card2,border:`1px solid ${i===prodPageNum?C.accent:C.border}`,borderRadius:7,padding:"5px 10px",color:i===prodPageNum?"#0a0a0f":C.text,cursor:"pointer",fontSize:12,fontWeight:i===prodPageNum?700:400}}>{i+1}</button>
                         ))}
-                        <button onClick={()=>setProdPageNum(p=>Math.min(pages-1,p+1))} disabled={prodPage===pages-1}
+                        <button onClick={()=>setProdPageNum(p=>Math.min(pages-1,p+1))} disabled={prodPageNum===pages-1}
                           style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:prodPageNum===pages-1?C.muted:C.text,cursor:prodPageNum===pages-1?"not-allowed":"pointer",fontSize:12}}>Next →</button>
                       </div>
                     )}
@@ -761,7 +761,7 @@ export default function Dashboard(){
                       : sales;
                     const PAGE_OR=10; const orPages=Math.ceil(filtered.length/PAGE_OR);
                     const paginatedOR=filtered.slice(ordersPage*PAGE_OR,(ordersPage+1)*PAGE_OR);
-                    return (
+                    return (<>
                     <div style={{overflowX:"auto"}}>
                       {salesSearch&&<div style={{fontSize:11,color:C.textDim,marginBottom:10}}>{filtered.length} result{filtered.length!==1?"s":""} for "{salesSearch}"</div>}
                       <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
@@ -820,7 +820,7 @@ export default function Dashboard(){
                           style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 12px",color:ordersPage===orPages-1?C.muted:C.text,cursor:ordersPage===orPages-1?"not-allowed":"pointer",fontSize:12}}>Next →</button>
                       </div>
                     )}
-                    );
+                    </>);
                   })()}
                 </div>
               </div>
