@@ -76,7 +76,7 @@ def init_db():
             );
             CREATE TABLE IF NOT EXISTS purchase_payments (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                purchase_id INTEGER NOT NULL REFERENCES purchases(id),
+                purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
                 added_by    INTEGER REFERENCES users(id),
                 amount      REAL NOT NULL,
                 date        TEXT NOT NULL,
@@ -177,6 +177,11 @@ def init_db():
         ]:
             try: db.execute(sql); db.commit()
             except: pass
+        # Clean up any orphaned product_ingredients left by deleted products
+        try:
+            db.execute("DELETE FROM product_ingredients WHERE product_id NOT IN (SELECT id FROM products)")
+            db.commit()
+        except: pass
 
 init_db()
 
@@ -438,6 +443,8 @@ def delete_purchase(pid:int, user=Depends(get_current_user)):
                 "AND product_id NOT IN (SELECT id FROM products)",
                 (p["item"],)
             )
+            # Delete purchase_payments first (no ON DELETE CASCADE on this FK)
+            db.execute("DELETE FROM purchase_payments WHERE purchase_id=?", (pid,))
             db.execute("DELETE FROM purchases WHERE id=?", (pid,))
             db.commit()
             return {"success": True}
