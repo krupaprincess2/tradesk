@@ -291,7 +291,7 @@ export default function Dashboard(){
           const available = invItem != null ? (invItem.available ?? invItem.purchased ?? 0) : 0;
           const totalNeeded = +ing.qty * qtyMaking;
           if(totalNeeded > available){
-            setError(`Not enough stock for "${ing.item_name}" — ${ing.qty} per product × ${qtyMaking} products = ${totalNeeded} needed, but only ${available} ${invItem?.unit||"units"} available`);
+            setError(`Not enough stock for "${ing.item_name}" — ${ing.qty} per product × ${qtyMaking} products = ${totalNeeded} needed, but only ${available} available`);
             setSaving(false);return;
           }
         }
@@ -519,7 +519,7 @@ export default function Dashboard(){
         {/* Tabs */}
         <div style={{padding:"0 24px",borderBottom:`1px solid ${C.border}`,display:"flex",gap:1,background:C.card,overflowX:"auto"}}>
           {TABS.map(t=>(
-            <button key={t} onClick={()=>setTab(t)} style={tabStyle(tab===t)}>
+            <button key={t} onClick={()=>{setTab(t);setError("");}} style={tabStyle(tab===t)}>
               {t}
               {t==="Dues"&&(dues.length+purchaseDues.length)>0&&<span style={{background:C.red,color:"#fff",borderRadius:"50%",fontSize:9,padding:"1px 5px",marginLeft:3}}>{dues.length+purchaseDues.length}</span>}
             </button>
@@ -654,7 +654,7 @@ export default function Dashboard(){
                             <td style={{padding:"10px 10px",color:C.text,whiteSpace:"nowrap"}}>{fmtDate(p.date)}</td>
                             <td style={{padding:"10px 10px",color:C.text}}>{p.supplier_name}</td>
                             <td style={{padding:"10px 10px",color:C.text,fontWeight:600}}>{p.item}</td>
-                            <td style={{padding:"10px 10px",color:C.text}}>{p.qty} {p.unit}</td>
+                            <td style={{padding:"10px 10px",color:C.text}}>{p.qty}</td>
                             <td style={{padding:"10px 10px",color:C.text,fontWeight:600}}>{fmt(p.total)}</td>
                             <td style={{padding:"10px 10px",color:C.green,fontWeight:600}}>{fmt(p.paid_amount)}</td>
                             <td style={{padding:"10px 10px",color:p.due_amount>0?C.red:C.green,fontWeight:600}}>{p.due_amount>0?fmt(p.due_amount):"—"}</td>
@@ -741,10 +741,10 @@ export default function Dashboard(){
                             </td>
                             <td style={{padding:"8px 10px",fontFamily:"'Syne',sans-serif",fontWeight:700,color:C.text}}>{prod.name}</td>
                             <td style={{padding:"8px 10px",color:C.textDim,maxWidth:180}}>{prod.description||"—"}</td>
-                            <td style={{padding:"8px 10px",color:C.accent,fontWeight:700,whiteSpace:"nowrap"}}>{fmt(prod.defined_price)}<span style={{color:C.muted,fontSize:10,fontWeight:400}}> /{prod.unit}</span></td>
+                            <td style={{padding:"8px 10px",color:C.accent,fontWeight:700,whiteSpace:"nowrap"}}>{fmt(prod.defined_price)}</td>
                             <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
                               <span style={{fontWeight:700,color:prod.qty_available>0?C.green:C.orange}}>{prod.qty_available}</span>
-                              <span style={{color:C.muted,fontSize:10,marginLeft:4}}>{prod.unit}</span>
+                              
                             </td>
                             <td style={{padding:"8px 10px"}}><Badge label={prod.is_active?"Active":"Inactive"} color={prod.is_active?C.green:C.red}/></td>
                             <td style={{padding:"8px 10px"}}>
@@ -850,7 +850,7 @@ export default function Dashboard(){
                               <td style={{padding:"10px 10px",color:C.text}}>
                                 {s.order_items&&s.order_items.length>0
                                   ? <span style={{color:C.textDim,fontSize:11}}>{s.order_items.length} item{s.order_items.length!==1?"s":""}</span>
-                                  : <span>{s.qty} {s.unit}</span>}
+                                  : <span>{s.qty}</span>}
                               </td>
                               <td style={{padding:"10px 10px",fontWeight:600}}>{fmt(s.total)}</td>
                               <td style={{padding:"10px 10px",color:C.green,fontWeight:600}}>{fmt(s.paid_amount)}</td>
@@ -940,7 +940,7 @@ export default function Dashboard(){
                           <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:10}}>
                             <div>
                               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15}}>{p.supplier_name}</div>
-                              <div style={{color:C.textDim,fontSize:12,marginTop:4}}>{p.item} × {p.qty} {p.unit} · {fmtDate(p.date)}</div>
+                              <div style={{color:C.textDim,fontSize:12,marginTop:4}}>{p.item} × {p.qty} · {fmtDate(p.date)}</div>
                             </div>
                             <div style={{textAlign:"right"}}>
                               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:16}}>{fmt(p.total)}</div>
@@ -1032,7 +1032,7 @@ export default function Dashboard(){
                       {inv.is_low&&<div style={{color:C.orange,fontSize:10,marginBottom:4,display:"flex",alignItems:"center",gap:3}}><AlertTriangle size={10}/>LOW STOCK</div>}
                       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:26,color:inv.is_low?C.orange:C.green}}>{inv.available||inv.purchased}</div>
                       <div style={{color:C.text,marginTop:3,fontSize:13}}>{inv.name}</div>
-                      <div style={{color:C.textDim,fontSize:11}}>{inv.unit}</div>
+                      
                       {inv.low_stock_threshold>0&&<div style={{color:C.textDim,fontSize:10,marginTop:4}}>Alert at: {inv.low_stock_threshold}</div>}
                     </div>
                   ))}
@@ -1228,7 +1228,7 @@ export default function Dashboard(){
                           const totalAvail = (i.available??i.purchased??0) - usedInOtherRows;
                           const qtyMaking = Math.max(1, +prodForm.qty_available||1);
                           const perProduct = Math.floor(totalAvail / qtyMaking);
-                          return {value:i.name,label:`${i.name} — max per product: ${perProduct} ${i.unit} (stock: ${totalAvail})`};
+                          return {value:i.name,label:`${i.name} — max per product: ${perProduct} (stock: ${totalAvail})`};
                         })}/>
                       </Field>
                       <Field label={idx===0?"Qty":""}>
@@ -1256,7 +1256,7 @@ export default function Dashboard(){
                               <div style={{fontSize:10,marginTop:3,color:exceeded?C.red:C.textDim,fontWeight:exceeded?700:400}}>
                                 {exceeded
                                   ? `⚠️ ${ing.qty}×${qtyMaking} products = ${totalConsumed} needed, only ${totalAvail} in stock`
-                                  : `Max ${maxQty} per product (${totalAvail} in stock ÷ ${qtyMaking} products)`}
+                                  : `Max ${maxQty} per product (${totalAvail} stock ÷ ${qtyMaking} products)`}
                               </div>
                             )}
                           </>;
@@ -1379,7 +1379,7 @@ export default function Dashboard(){
                         defined_price:prod?.defined_price||0
                       }:x));
                     }} placeholder="— Choose product —"
-                    options={products.filter(p=>p.is_active).map(p=>({value:p.id,label:`${p.name} — ${fmt(p.defined_price)} · Stock: ${p.qty_available} ${p.unit}${p.qty_available<=0?" ⚠️ OUT":""}`}))}/>
+                    options={products.filter(p=>p.is_active).map(p=>({value:p.id,label:`${p.name} — ${fmt(p.defined_price)} · Stock: ${p.qty_available}${p.qty_available<=0?" ⚠️ OUT":""}`}))}/>
                   </Field>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                     <Field label="Qty"><Input type="number" placeholder="0" value={item.qty} onChange={e=>setOrderItems(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/></Field>
@@ -1609,7 +1609,7 @@ export default function Dashboard(){
                     <div style={{fontSize:11,fontWeight:600,color:C.accent,marginBottom:6}}>🧪 Raw Materials</div>
                     {editProdBuildInfo.ingredients.map((ing,i)=>(
                       <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:`1px solid ${C.border}33`}}>
-                        <span style={{color:C.text}}>{ing.item_name} <span style={{color:C.textDim}}>× {ing.qty} {ing.unit}</span></span>
+                        <span style={{color:C.text}}>{ing.item_name} <span style={{color:C.textDim}}>× {ing.qty}</span></span>
                         <span style={{color:C.accent,fontWeight:600}}>{fmt(ing.qty*ing.unit_cost)}</span>
                       </div>
                     ))}
