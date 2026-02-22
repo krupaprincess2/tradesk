@@ -13,7 +13,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 JWT_SECRET     = os.getenv("JWT_SECRET", "tradesk_secret_2026")
 # DEPLOY_VERSION: change this value to force all users to re-login immediately
 # Update this in Railway env vars OR just change the default value below
-DEPLOY_VERSION = os.getenv("DEPLOY_VERSION", "v4")
+DEPLOY_VERSION = os.getenv("DEPLOY_VERSION", "v5")  # bumped → invalidates all old sessions
 # Combine secret + version so changing DEPLOY_VERSION invalidates all existing tokens
 _EFFECTIVE_SECRET = f"{JWT_SECRET}_{DEPLOY_VERSION}"
 DB_PATH        = os.getenv("DB_PATH", "tradesk.db")
@@ -441,18 +441,27 @@ def build_product(data:ProductBuildCreate, user=Depends(get_current_user)):
     ingredients = data.ingredients or []
     charges = data.charges or []
     # Validate stock availability for each ingredient
+    # available = total purchased - already committed to other product definitions
     with get_db() as db:
         for ing in ingredients:
             item_name = ing.get("item_name","")
             needed_qty = float(ing.get("qty",0))
             if item_name and needed_qty > 0:
-                row = db.execute(
+                purchased_row = db.execute(
                     "SELECT COALESCE(SUM(qty),0) as total FROM purchases WHERE item=?",
                     (item_name,)
                 ).fetchone()
-                available = float(row["total"]) if row else 0
+                used_row = db.execute(
+                    "SELECT COALESCE(SUM(qty),0) as used FROM product_ingredients WHERE item_name=?",
+                    (item_name,)
+                ).fetchone()
+                purchased = float(purchased_row["total"]) if purchased_row else 0
+                already_used = float(used_row["used"]) if used_row else 0
+                available = purchased - already_used
                 if needed_qty > available:
-                    raise HTTPException(400, f"Not enough stock for '{item_name}' — need {needed_qty} but only {available} available")
+                    raise HTTPException(400,
+                        f"Not enough stock for '{item_name}' — need {needed_qty}, "
+                        f"available {available} (purchased {purchased} - used in other products {already_used})")
     # Calculate total cost from ingredients
     ingredients_cost = sum(float(i.get("qty",0)) * float(i.get("unit_cost",0)) for i in ingredients)
     charges_total = sum(float(c.get("amount",0)) for c in charges)
@@ -722,10 +731,17 @@ def get_return_dues(user=Depends(get_current_user)):
 def get_inventory(user=Depends(get_current_user)):
     with get_db() as db:
         return [dict(r) for r in db.execute("""
-            SELECT r.name,r.unit,r.low_stock_threshold,COALESCE(p.qty,0) as purchased,
-                CASE WHEN COALESCE(p.qty,0)<=r.low_stock_threshold AND r.low_stock_threshold>0 THEN 1 ELSE 0 END as is_low
+            SELECT r.name, r.unit, r.low_stock_threshold,
+                COALESCE(p.qty,0) as purchased,
+                COALESCE(pi.used,0) as used_in_products,
+                COALESCE(p.qty,0) - COALESCE(pi.used,0) as available,
+                CASE WHEN (COALESCE(p.qty,0) - COALESCE(pi.used,0)) <= r.low_stock_threshold
+                     AND r.low_stock_threshold > 0 THEN 1 ELSE 0 END as is_low
             FROM raw_items r
-            LEFT JOIN (SELECT item,SUM(qty) as qty FROM purchases GROUP BY item) p ON p.item=r.name
+            LEFT JOIN (SELECT item, SUM(qty) as qty FROM purchases GROUP BY item) p
+                ON p.item = r.name
+            LEFT JOIN (SELECT item_name, SUM(qty) as used FROM product_ingredients GROUP BY item_name) pi
+                ON pi.item_name = r.name
         """).fetchall()]
 
 @app.get("/health")

@@ -267,12 +267,13 @@ export default function Dashboard(){
       if(prodBuildMode){
         // Builder mode: ingredients + charges, auto-calc price
         if(prodIngredients.length===0&&prodCharges.length===0){setError("Add at least one ingredient or charge");setSaving(false);return;}
-        // Validate each ingredient qty against available stock
+        // Validate each ingredient qty against truly available stock
+        // available = purchased - already used in other product definitions
         for(const ing of prodIngredients.filter(i=>i.item_name&&i.qty)){
           const invItem = inventory.find(i=>i.name===ing.item_name);
-          const available = invItem?.purchased || 0;
+          const available = invItem != null ? (invItem.available ?? invItem.purchased ?? 0) : 0;
           if(+ing.qty > available){
-            setError(`Not enough stock for "${ing.item_name}" — you need ${ing.qty} but only ${available} ${invItem?.unit||"units"} available`);
+            setError(`Not enough stock for "${ing.item_name}" — you need ${ing.qty} but only ${available} ${invItem?.unit||"units"} available (already used in other products)`);
             setSaving(false);return;
           }
         }
@@ -1173,21 +1174,21 @@ export default function Dashboard(){
                           // Auto-fill unit_cost from most recent purchase of this item
                           const recentPurch = purchases.filter(p=>p.item===name).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
                           setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,item_name:name,unit:invItem?.unit||x.unit,unit_cost:recentPurch?.unit_cost||""}:x));
-                        }} placeholder="— Select item —" options={inventory.map(i=>({value:i.name,label:`${i.name} (${i.purchased} ${i.unit})`}))}/>
+                        }} placeholder="— Select item —" options={inventory.map(i=>({value:i.name,label:`${i.name} — available: ${i.available??i.purchased} ${i.unit}`}))}/>
                       </Field>
                       <Field label={idx===0?"Qty":""}>
                         {(()=>{
                           const invItem = inventory.find(i=>i.name===ing.item_name);
-                          const maxQty = invItem?.purchased || 0;
+                          const maxQty = invItem != null ? (invItem.available ?? invItem.purchased ?? 0) : 0;
                           const exceeded = ing.item_name && +ing.qty > maxQty;
                           return <>
                             <Input type="number" placeholder="0" value={ing.qty}
                               max={maxQty||undefined}
                               style={{borderColor: exceeded ? C.red : undefined}}
                               onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/>
-                            {ing.item_name && maxQty>0 && (
+                            {ing.item_name && (
                               <div style={{fontSize:10,marginTop:3,color:exceeded?C.red:C.textDim,fontWeight:exceeded?700:400}}>
-                                {exceeded ? `⚠️ Max: ${maxQty}` : `Available: ${maxQty} ${invItem?.unit||""}`}
+                                {exceeded ? `⚠️ Only ${maxQty} available` : `Available: ${maxQty} ${invItem?.unit||""}`}
                               </div>
                             )}
                           </>;

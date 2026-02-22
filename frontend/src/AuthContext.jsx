@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 
 const AuthContext = createContext(null);
 const BASE = "/api";
@@ -180,8 +180,9 @@ export function LoginPage({ onGoRegister }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
+  const btnRef = useRef(null);
 
-  const handleLogin = async () => {
+  const handleLogin = useCallback(async () => {
     setError("");
     if (!email || !password) { setError("Email and password are required"); return; }
     setLoading(true);
@@ -192,9 +193,14 @@ export function LoginPage({ onGoRegister }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [email, password, login]);
 
-  const onKey = (e) => { if (e.key === "Enter") handleLogin(); };
+  const onKey = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      btnRef.current?.click();
+    }
+  };
 
   return (
     <Card>
@@ -202,7 +208,7 @@ export function LoginPage({ onGoRegister }) {
       <div style={{ textAlign: "center", color: C.textDim, fontSize: 13, marginBottom: 26, marginTop: -18 }}>
         Sign in to your account
       </div>
-      <div onKeyDown={onKey}>
+
       <Field label="Email">
         <input type="email" placeholder="your@email.com" value={email}
           onChange={e => setEmail(e.target.value)} onKeyDown={onKey}
@@ -224,9 +230,20 @@ export function LoginPage({ onGoRegister }) {
 
       <ErrorBox msg={error} />
 
-      <SubmitBtn loading={loading} label="Sign In →" loadingLabel="Signing in..." onClick={handleLogin} />
+      <button
+        ref={btnRef}
+        onClick={handleLogin}
+        disabled={loading}
+        style={{
+          width: "100%", background: C.accent, border: "none", borderRadius: 10,
+          padding: "12px 0", cursor: loading ? "not-allowed" : "pointer",
+          fontWeight: 700, fontSize: 15, fontFamily: "'DM Sans',sans-serif",
+          color: "#0a0a0f", opacity: loading ? 0.7 : 1, transition: "opacity 0.2s",
+        }}
+      >
+        {loading ? "Signing in..." : "Sign In →"}
+      </button>
 
-      </div>
       {onGoRegister && (
         <div style={{ textAlign: "center", marginTop: 18, color: C.textDim, fontSize: 13 }}>
           Don't have an account?{" "}
@@ -248,8 +265,9 @@ export function RegisterPage({ onGoLogin }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
+  const btnRef = useRef(null);
 
-  const handleRegister = async () => {
+  const handleRegister = useCallback(async () => {
     setError("");
     if (!name.trim()) { setError("Full name is required"); return; }
     if (!email.trim()) { setError("Email is required"); return; }
@@ -263,10 +281,14 @@ export function RegisterPage({ onGoLogin }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [name, email, password, register]);
 
-  // ✅ Enter key submits signup
-  const onKey = (e) => { if (e.key === "Enter") handleRegister(); };
+  const onKey = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      btnRef.current?.click();
+    }
+  };
 
   return (
     <Card>
@@ -274,7 +296,7 @@ export function RegisterPage({ onGoLogin }) {
       <div style={{ textAlign: "center", color: C.textDim, fontSize: 13, marginBottom: 26, marginTop: -18 }}>
         Create your account
       </div>
-      <div onKeyDown={onKey}>
+
       <Field label="Full Name">
         <input type="text" placeholder="Your name" value={name}
           onChange={e => setName(e.target.value)} onKeyDown={onKey}
@@ -302,9 +324,20 @@ export function RegisterPage({ onGoLogin }) {
 
       <ErrorBox msg={error} />
 
-      <SubmitBtn loading={loading} label="Create Account" loadingLabel="Creating account..." onClick={handleRegister} />
+      <button
+        ref={btnRef}
+        onClick={handleRegister}
+        disabled={loading}
+        style={{
+          width: "100%", background: C.accent, border: "none", borderRadius: 10,
+          padding: "12px 0", cursor: loading ? "not-allowed" : "pointer",
+          fontWeight: 700, fontSize: 15, fontFamily: "'DM Sans',sans-serif",
+          color: "#0a0a0f", opacity: loading ? 0.7 : 1, transition: "opacity 0.2s",
+        }}
+      >
+        {loading ? "Creating account..." : "Create Account"}
+      </button>
 
-      </div>
       {onGoLogin && (
         <div style={{ textAlign: "center", marginTop: 18, color: C.textDim, fontSize: 13 }}>
           Already have one?{" "}
