@@ -279,13 +279,14 @@ export default function Dashboard(){
       if(prodBuildMode){
         // Builder mode: ingredients + charges, auto-calc price
         if(prodIngredients.length===0&&prodCharges.length===0){setError("Add at least one ingredient or charge");setSaving(false);return;}
-        // Validate each ingredient qty against truly available stock
-        // available = purchased - already used in other product definitions
+        // Validate: ingredient qty is PER PRODUCT, so total consumed = qty × qty_making
+        const qtyMaking = Math.max(1, +prodForm.qty_available||1);
         for(const ing of prodIngredients.filter(i=>i.item_name&&i.qty)){
           const invItem = inventory.find(i=>i.name===ing.item_name);
           const available = invItem != null ? (invItem.available ?? invItem.purchased ?? 0) : 0;
-          if(+ing.qty > available){
-            setError(`Not enough stock for "${ing.item_name}" — you need ${ing.qty} but only ${available} ${invItem?.unit||"units"} available (already used in other products)`);
+          const totalNeeded = +ing.qty * qtyMaking;
+          if(totalNeeded > available){
+            setError(`Not enough stock for "${ing.item_name}" — ${ing.qty} per product × ${qtyMaking} products = ${totalNeeded} needed, but only ${available} ${invItem?.unit||"units"} available`);
             setSaving(false);return;
           }
         }
@@ -1197,8 +1198,10 @@ export default function Dashboard(){
                             .filter((_,ridx)=>ridx!==idx)
                             .filter(r=>r.item_name===i.name)
                             .reduce((sum,r)=>sum+(+r.qty||0),0);
-                          const trueAvail = (i.available??i.purchased??0) - usedInOtherRows;
-                          return {value:i.name,label:`${i.name} — available: ${trueAvail} ${i.unit}`};
+                          const totalAvail = (i.available??i.purchased??0) - usedInOtherRows;
+                          const qtyMaking = Math.max(1, +prodForm.qty_available||1);
+                          const perProduct = Math.floor(totalAvail / qtyMaking);
+                          return {value:i.name,label:`${i.name} — max per product: ${perProduct} ${i.unit} (stock: ${totalAvail})`};
                         })}/>
                       </Field>
                       <Field label={idx===0?"Qty":""}>
@@ -1208,10 +1211,15 @@ export default function Dashboard(){
                             .filter((_,ridx)=>ridx!==idx)
                             .filter(r=>r.item_name===ing.item_name)
                             .reduce((sum,r)=>sum+(+r.qty||0),0);
-                          const maxQty = invItem != null
+                          const totalAvail = invItem != null
                             ? Math.max(0,(invItem.available??invItem.purchased??0)-usedElsewhere)
                             : 0;
-                          const exceeded = ing.item_name && +ing.qty > maxQty;
+                          // qty entered here is PER PRODUCT — total consumed = qty × qty_making
+                          // so max per product = floor(totalAvail / qty_making)
+                          const qtyMaking = Math.max(1, +prodForm.qty_available||1);
+                          const maxQty = Math.floor(totalAvail / qtyMaking);
+                          const totalConsumed = (+ing.qty||0) * qtyMaking;
+                          const exceeded = ing.item_name && totalConsumed > totalAvail;
                           return <>
                             <Input type="number" placeholder="0" value={ing.qty}
                               max={maxQty||undefined}
@@ -1219,7 +1227,9 @@ export default function Dashboard(){
                               onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/>
                             {ing.item_name && (
                               <div style={{fontSize:10,marginTop:3,color:exceeded?C.red:C.textDim,fontWeight:exceeded?700:400}}>
-                                {exceeded ? `⚠️ Only ${maxQty} left` : `Available: ${maxQty} ${invItem?.unit||""}`}
+                                {exceeded
+                                  ? `⚠️ ${ing.qty}×${qtyMaking} products = ${totalConsumed} needed, only ${totalAvail} in stock`
+                                  : `Max ${maxQty} per product (${totalAvail} in stock ÷ ${qtyMaking} products)`}
                               </div>
                             )}
                           </>;

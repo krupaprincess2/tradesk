@@ -479,27 +479,34 @@ def build_product(data:ProductBuildCreate, user=Depends(get_current_user)):
     ingredients = data.ingredients or []
     charges = data.charges or []
     # Validate stock availability for each ingredient
+    # qty in each ingredient row is PER PRODUCT — total consumed = qty × qty_making
     # available = total purchased - already committed to other product definitions
+    qty_making = max(1, float(data.qty_available) if data.qty_available else 1)
     with get_db() as db:
         for ing in ingredients:
             item_name = ing.get("item_name","")
-            needed_qty = float(ing.get("qty",0))
-            if item_name and needed_qty > 0:
+            qty_per_product = float(ing.get("qty",0))
+            total_needed = qty_per_product * qty_making
+            if item_name and total_needed > 0:
                 purchased_row = db.execute(
                     "SELECT COALESCE(SUM(qty),0) as total FROM purchases WHERE item=?",
                     (item_name,)
                 ).fetchone()
                 used_row = db.execute(
-                    "SELECT COALESCE(SUM(qty),0) as used FROM product_ingredients WHERE item_name=?",
+                    """SELECT COALESCE(SUM(pi.qty),0) as used
+                       FROM product_ingredients pi
+                       JOIN products pr ON pr.id = pi.product_id
+                       WHERE pi.item_name=?""",
                     (item_name,)
                 ).fetchone()
                 purchased = float(purchased_row["total"]) if purchased_row else 0
                 already_used = float(used_row["used"]) if used_row else 0
                 available = purchased - already_used
-                if needed_qty > available:
+                if total_needed > available:
                     raise HTTPException(400,
-                        f"Not enough stock for '{item_name}' — need {needed_qty}, "
-                        f"available {available} (purchased {purchased} - used in other products {already_used})")
+                        f"Not enough stock for '{item_name}' — "
+                        f"{qty_per_product} per product × {qty_making} products = {total_needed} needed, "
+                        f"but only {available} available")
     # Calculate total cost from ingredients
     ingredients_cost = sum(float(i.get("qty",0)) * float(i.get("unit_cost",0)) for i in ingredients)
     charges_total = sum(float(c.get("amount",0)) for c in charges)
