@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from typing import Optional
 import sqlite3, hashlib, hmac, jwt, os, secrets, base64
 from datetime import datetime, timedelta
@@ -206,9 +206,9 @@ def require_admin(user=Depends(get_current_user)):
     return user
 
 # ── Models ────────────────────────────────────────────────────
-class RegisterReq(BaseModel): name:str; email:EmailStr; password:str
-class LoginReq(BaseModel): email:EmailStr; password:str
-class CreateUserReq(BaseModel): name:str; email:EmailStr; password:str; role:str="staff"; can_edit_delete:int=0
+class RegisterReq(BaseModel): name:str; email:str; password:str
+class LoginReq(BaseModel): email:str; password:str
+class CreateUserReq(BaseModel): name:str; email:str; password:str; role:str="staff"; can_edit_delete:int=0
 class ResetPasswordReq(BaseModel): new_password:str
 class SupplierCreate(BaseModel): name:str; phone:Optional[str]=None; address:Optional[str]=None; notes:Optional[str]=None
 class PurchaseCreate(BaseModel): date:str; supplier_name:str; item:str; qty:float; unit:str="units"; unit_cost:float; paid_amount:float=0; low_stock_alert:float=0; notes:Optional[str]=None
@@ -236,6 +236,8 @@ class OrderCreate(BaseModel):
 @app.post("/api/auth/register", status_code=201)
 def register(data: RegisterReq):
     try:
+        if not data.email or "@" not in data.email or "." not in data.email.split("@")[-1]:
+            raise HTTPException(400, "Please enter a valid email address")
         if len(data.password) < 6: raise HTTPException(400, "Password must be at least 6 characters")
         with get_db() as db:
             count = db.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
