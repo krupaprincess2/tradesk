@@ -538,8 +538,8 @@ export default function Dashboard(){
                   </div>
                 )}
                 <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
-                  <StatCard icon={ShoppingCart} label="Purchase Total" value={fmt(summary.totalPurchases)} sub={`Paid: ${fmt(summary.purchasePaid)} · Due: ${fmt(summary.purchaseDue)}`} color={C.accent}/>
-                  <StatCard icon={TrendingUp} label="Sales Total" value={fmt(summary.totalSales)} sub={`${summary.saleCount||0} sales · ${summary.returnsCount||0} returns`} color={C.green}/>
+                  <StatCard icon={ShoppingCart} label="Raw Goods Total" value={fmt(summary.totalPurchases)} sub={`Paid: ${fmt(summary.purchasePaid)} · Due: ${fmt(summary.purchaseDue)}`} color={C.accent}/>
+                  <StatCard icon={TrendingUp} label="Orders Total" value={fmt(summary.totalSales)} sub={`${summary.saleCount||0} orders · ${summary.returnsCount||0} returns`} color={C.green}/>
                   <StatCard icon={CheckCircle} label="Collected" value={fmt(summary.saleCollected)} sub="From customers" color={C.blue}/>
                   <StatCard icon={AlertCircle} label="Customer Due" value={fmt(summary.saleDue)} sub={`${dues.length} pending`} color={C.red}/>
                   <StatCard icon={Package} label="Net Profit" value={fmt(summary.profit)} sub="Collected − Purchase Paid" color={summary.profit>=0?C.green:C.red}/>
@@ -553,7 +553,7 @@ export default function Dashboard(){
                         <XAxis dataKey="month" stroke={C.muted} fontSize={9}/>
                         <YAxis stroke={C.muted} fontSize={9} tickFormatter={v=>`₹${(v/1000).toFixed(0)}k`}/>
                         <Tooltip formatter={v=>fmt(v)} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,fontSize:11}}/>
-                        <Bar dataKey="purchases" fill={C.accent} radius={[3,3,0,0]} name="Purchases"/>
+                        <Bar dataKey="purchases" fill={C.accent} radius={[3,3,0,0]} name="Raw Goods"/>
                         <Bar dataKey="collected" fill={C.green} radius={[3,3,0,0]} name="Collected"/>
                       </BarChart>
                     </ResponsiveContainer>
@@ -585,11 +585,12 @@ export default function Dashboard(){
               <div>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
                   <div>
-                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Raw Material Purchases</div>
+                    <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:18}}>Raw Goods</div>
                     <div style={{color:C.textDim,fontSize:12,marginTop:2}}>Track raw goods with partial payments and images · {purchases.length} total</div>
                   </div>
-                  <button onClick={()=>{setError("");setShowPModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.accent,color:"#0a0a0f",border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Purchase</button>
+                  <button onClick={()=>{setError("");setShowPModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.accent,color:"#0a0a0f",border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Raw Good</button>
                 </div>
+                {error&&<div style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,color:C.red,fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>⚠️ {error}</span><button onClick={()=>setError("")} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:16,lineHeight:1}}>×</button></div>}
                 {purchaseDues.length>0&&(
                   <div style={{background:`${C.orange}0d`,border:`1px solid ${C.orange}33`,borderRadius:10,padding:"10px 16px",marginBottom:12,fontSize:12,color:C.orange}}>
                     ⚠️ Supplier dues pending: <strong>{fmt(totalPurchaseDues)}</strong> from {purchaseDues.length} purchase(s)
@@ -682,6 +683,7 @@ export default function Dashboard(){
                   </div>
                   <button onClick={()=>{setError("");setProdForm(emptyProd);setProdImage(null);setProdIngredients([]);setProdCharges([]);setProdBuildMode(false);setShowProdModal(true);}} style={{display:"flex",alignItems:"center",gap:6,background:C.purple,color:C.text,border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>Add Product</button>
                 </div>
+                {error&&<div style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,color:C.red,fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>⚠️ {error}</span><button onClick={()=>setError("")} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:16,lineHeight:1}}>×</button></div>}
                 {/* Search */}
                 <div style={{position:"relative",marginBottom:14}}>
                   <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
@@ -766,6 +768,7 @@ export default function Dashboard(){
                   <button onClick={()=>{setError("");setPriceWarning("");setShowSModal(true);setOrderItems([{product_id:"",product_name:"",qty:"",unit:"pcs",unit_price:"",defined_price:0}]);}} style={{display:"flex",alignItems:"center",gap:6,background:C.green,color:"#0a0a0f",border:"none",borderRadius:9,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13}}><Plus size={14}/>New Order</button>
                 </div>
 
+                {error&&<div style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:8,padding:"10px 14px",marginBottom:12,color:C.red,fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>⚠️ {error}</span><button onClick={()=>setError("")} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:16,lineHeight:1}}>×</button></div>}
                 {/* Search bar above table */}
                 <div style={{position:"relative",marginBottom:14}}>
                   <Search size={14} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:C.muted}}/>
@@ -1161,7 +1164,9 @@ export default function Dashboard(){
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               {!prodBuildMode&&<Field label="Defined Price (₹)"><Input type="number" placeholder="0" value={prodForm.defined_price} onChange={e=>setProdForm(f=>({...f,defined_price:e.target.value}))}/></Field>}
               <Field label="Unit"><Input type="text" placeholder="pcs/set" value={prodForm.unit} onChange={e=>setProdForm(f=>({...f,unit:e.target.value}))}/></Field>
-              <Field label="Qty Available"><Input type="number" placeholder="0" value={prodForm.qty_available} onChange={e=>setProdForm(f=>({...f,qty_available:e.target.value}))}/></Field>
+              <Field label={prodBuildMode?"Qty You're Making (products)":"Qty Available"}><Input type="number" placeholder={prodBuildMode?"1":"0"} value={prodForm.qty_available} onChange={e=>setProdForm(f=>({...f,qty_available:e.target.value}))}/>
+                {prodBuildMode&&<div style={{fontSize:10,color:C.textDim,marginTop:3}}>How many finished products are you making from these materials?</div>}
+              </Field>
             </div>
 
             {/* BUILDER MODE: ingredients + charges */}
@@ -1186,12 +1191,26 @@ export default function Dashboard(){
                           // Auto-fill unit_cost from most recent purchase of this item
                           const recentPurch = purchases.filter(p=>p.item===name).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
                           setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,item_name:name,unit:invItem?.unit||x.unit,unit_cost:recentPurch?.unit_cost||""}:x));
-                        }} placeholder="— Select item —" options={inventory.map(i=>({value:i.name,label:`${i.name} — available: ${i.available??i.purchased} ${i.unit}`}))}/>
+                        }} placeholder="— Select item —" options={inventory.map(i=>{
+                          // Subtract qty already used in OTHER ingredient rows of this form
+                          const usedInOtherRows = prodIngredients
+                            .filter((_,ridx)=>ridx!==idx)
+                            .filter(r=>r.item_name===i.name)
+                            .reduce((sum,r)=>sum+(+r.qty||0),0);
+                          const trueAvail = (i.available??i.purchased??0) - usedInOtherRows;
+                          return {value:i.name,label:`${i.name} — available: ${trueAvail} ${i.unit}`};
+                        })}/>
                       </Field>
                       <Field label={idx===0?"Qty":""}>
                         {(()=>{
                           const invItem = inventory.find(i=>i.name===ing.item_name);
-                          const maxQty = invItem != null ? (invItem.available ?? invItem.purchased ?? 0) : 0;
+                          const usedElsewhere = prodIngredients
+                            .filter((_,ridx)=>ridx!==idx)
+                            .filter(r=>r.item_name===ing.item_name)
+                            .reduce((sum,r)=>sum+(+r.qty||0),0);
+                          const maxQty = invItem != null
+                            ? Math.max(0,(invItem.available??invItem.purchased??0)-usedElsewhere)
+                            : 0;
                           const exceeded = ing.item_name && +ing.qty > maxQty;
                           return <>
                             <Input type="number" placeholder="0" value={ing.qty}
@@ -1200,7 +1219,7 @@ export default function Dashboard(){
                               onChange={e=>setProdIngredients(arr=>arr.map((x,i)=>i===idx?{...x,qty:e.target.value}:x))}/>
                             {ing.item_name && (
                               <div style={{fontSize:10,marginTop:3,color:exceeded?C.red:C.textDim,fontWeight:exceeded?700:400}}>
-                                {exceeded ? `⚠️ Only ${maxQty} available` : `Available: ${maxQty} ${invItem?.unit||""}`}
+                                {exceeded ? `⚠️ Only ${maxQty} left` : `Available: ${maxQty} ${invItem?.unit||""}`}
                               </div>
                             )}
                           </>;
@@ -1439,7 +1458,7 @@ export default function Dashboard(){
                 options={[{value:"staff",label:"Staff — cannot see P&L"},{value:"admin",label:"Admin — full access"}]}/>
             </Field>
             <div style={{background:C.card2,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:C.textDim}}>
-              <strong style={{color:C.text}}>Staff access:</strong> Can add/view Purchases, Sales, Dues, Inventory, Invoices<br/>
+              <strong style={{color:C.text}}>Staff access:</strong> Can add/view Raw Goods, Orders, Dues, Inventory, Invoices<br/>
               <strong style={{color:C.text}}>Cannot access:</strong> Dashboard (P&L), Users, Suppliers, Delete records
             </div>
             {error&&<div style={{color:C.red,fontSize:12,marginBottom:10}}>{error}</div>}
